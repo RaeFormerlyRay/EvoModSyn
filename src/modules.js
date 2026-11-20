@@ -236,7 +236,7 @@ const Mods = (() => {
     m.p('kit', { label: 'Kit', steps: KITS, def: 1 / 3 });
     m.p('tune', { label: 'Tune', min: 0.6, max: 1.6, curve: 'exp', def: 0.5, fmt: v => '×' + v.toFixed(2) });
     m.p('decay', { label: 'Decay', min: 0.3, max: 2.5, curve: 'exp', def: 0.45, fmt: v => '×' + v.toFixed(2) });
-    m.p('drive', { label: 'Drive', def: 0.1, fmt: pct, apply: v => { sh.curve = DSP.curveTanh(v * 0.6); pre.gain.value = 1 + v * 3; } });
+    m.p('drive', { label: 'Drive', def: 0.1, fmt: pct, apply: v => { { const c = DSP.curveTanh(v * 0.6); if (sh._c !== c) { sh._c = c; sh.curve = c; } } pre.gain.value = 1 + v * 3; } });
     m.p('accent', { label: 'Accent', def: 0.6, fmt: pct });
     m.p('trigv', { label: 'Trig→', steps: INST, def: 0 });
     m.p('level', { label: 'Level', def: 0.75, fmt: pct, apply: v => smooth(out.gain, v * 1.1) });
@@ -328,13 +328,13 @@ const Mods = (() => {
     const setWave = (w) => { const map = { SAW: 'sawtooth', SQR: 'square', TRI: 'triangle' }; [o1, o2].forEach(o => { if (w === 'PULSE') o.setPeriodicWave(pulseW); else o.type = map[w]; }); };
     const voiceShape = () => {
       const md = m.params.model.choice, res = m.v('res'), d = m.v('drive');
-      const q = 0.7 + res * res * (md === 'SCREAM' ? 28 : md === 'ACID' ? 20 : md === 'LADDER' ? 16 : 12);
+      const q = 0.7 + res * res * (md === 'SCREAM' ? 20 : md === 'ACID' ? 20 : md === 'LADDER' ? 16 : 12);
       lp1.Q.value = q;
       lp2.type = (md === 'ACID' || md === 'LADDER') ? 'lowpass' : 'allpass';
       lp2.Q.value = md === 'LADDER' ? 0.9 : 0.6;
       hp.frequency.value = md === 'SCREAM' ? 90 + res * 200 : md === 'ODYSSEY' ? 140 : 18;
       hp.Q.value = md === 'SCREAM' ? 1 + res * 8 : 0.7;
-      drv.curve = md === 'SCREAM' ? DSP.curveHard(d) : DSP.curveTanh(d * (md === 'ACID' ? 0.6 : 0.4) + 0.02);
+      { const c = md === 'SCREAM' ? DSP.curveHard(d) : DSP.curveTanh(d * (md === 'ACID' ? 0.6 : 0.4) + 0.02); if (drv._c !== c) { drv._c = c; drv.curve = c; } }
       pre.gain.value = 0.8 + d * (md === 'SCREAM' ? 3 : 1.5);
       smooth(cho.gain, md === 'JOVE' ? 0.55 : md === 'SEM' ? 0.2 : 0);
       if (md === 'SEM') lp1.Q.value = 0.7 + res * 9;
@@ -357,7 +357,7 @@ const Mods = (() => {
     m.p('accent', { label: 'Accent', def: 0.6, fmt: pct });
     m.p('drive', { label: 'Drive', def: 0.25, fmt: pct, apply: voiceShape });
     m.p('glide', { label: 'Glide', min: 0, max: 0.5, def: 0, fmt: secs });
-    m.p('level', { label: 'Level', def: 0.7, fmt: pct, apply: v => smooth(out.gain, v) });
+    m.p('level', { label: 'Level', def: 0.7, fmt: pct, apply: v => smooth(out.gain, v * 0.75) });
     m.inEvent('NOTE', function (e) { if (e.kind === 'note') this.note(e); else this.note({ ...e, midi: this.last || 45, dur: 0.12 }); }, 'note in');
     m.inCV('CUT', [lp1.detune, lp2.detune], 2400, 'cutoff CV');
     m.inCV('FM', [o1.frequency, o2.frequency], 220, 'audio-rate FM');
@@ -404,15 +404,18 @@ const Mods = (() => {
       return voices;
     };
     const bus1 = gain(0.7), bus2 = gain(0.3), pos1 = gain(1), pos2 = gain(1), pcs1 = constSrc(0), pcs2 = constSrc(0), wpos = gain(0);
-    pcs1.connect(pos1); pcs2.connect(pos2); lfoBus.connect(wpos); wpos.connect(pos1); wpos.connect(pos2);
+    // the LFO restarts on every note; a gentle low-pass on the control path removes the click of that phase jump
+    const lfoSm = filt('lowpass', 45, 0.5); lfoBus.connect(lfoSm);
+    pcs1.connect(pos1); pcs2.connect(pos2); lfoSm.connect(wpos); wpos.connect(pos1); wpos.connect(pos2);
     const v1 = mkOsc(3, bus1, pos1), v2 = mkOsc(1, bus2, pos2);
     const subO = ctx.createOscillator(), subG = gain(0); subO.start(); subO.connect(subG);
     [bus1, bus2, subG].forEach(b => b.connect(mix));
-    const f1 = filt('lowpass', 500, 2), f2 = filt('lowpass', 500, 0.7), pre = gain(1), drv = shaper(DSP.curveTanh(0.3)), comp = ctx.createDynamicsCompressor();
+    const f1 = filt('lowpass', 500, 2), f2 = filt('lowpass', 500, 0.7), pre = gain(0.5), drv = shaper(DSP.curveTanh(0.08)), post = gain(1), aa = filt('lowpass', 11000, 0.5), comp = ctx.createDynamicsCompressor();
+    drv.oversample = '4x';
     comp.threshold.value = -18; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.08;
-    mix.connect(f1); f1.connect(f2); f2.connect(pre); pre.connect(drv); drv.connect(comp); comp.connect(vca); vca.connect(out);
+    mix.connect(f1); f1.connect(f2); f2.connect(pre); pre.connect(drv); drv.connect(post); post.connect(aa); aa.connect(comp); comp.connect(vca); vca.connect(out);
     const envCS = constSrc(0), envG = gain(0), wcut = gain(0);
-    envCS.connect(envG); envG.connect(f1.detune); envG.connect(f2.detune); lfoBus.connect(wcut); wcut.connect(f1.detune); wcut.connect(f2.detune);
+    envCS.connect(envG); envG.connect(f1.detune); envG.connect(f2.detune); lfoSm.connect(wcut); wcut.connect(f1.detune); wcut.connect(f2.detune);
     const setTbl = (voices, i) => voices.forEach(v => { v.a.setPeriodicWave(TBL[i].a); v.b.setPeriodicWave(TBL[i].b); });
     const tnames = DSP.TABLES.map(t => t.name);
     m.p('t1', { label: 'Table A', steps: tnames, def: 1 / 5, apply: v => setTbl(v1, v) });
@@ -429,11 +432,11 @@ const Mods = (() => {
     m.p('dec', { label: 'Decay', min: 0.03, max: 2, curve: 'exp', def: 0.4, fmt: secs });
     m.p('wrate', { label: 'Wob Rate', steps: DIVS, def: 4 / 8, apply: () => m.retuneLfo() });
     m.p('wcut', { label: 'Wob→Cut', def: 0.55, fmt: pct, apply: v => smooth(wcut.gain, v * 3600) });
-    m.p('wpos', { label: 'Wob→Pos', def: 0.35, fmt: pct, apply: v => smooth(wpos.gain, v * 0.6) });
+    m.p('wpos', { label: 'Wob→Pos', def: 0.35, fmt: pct, apply: v => smooth(wpos.gain, v * 0.4) });
     m.p('wshape', { label: 'Wob Shape', steps: ['SINE', 'TRI', 'SAW', 'SQR'], def: 0, apply: () => m.retuneLfo(true) });
-    m.p('drive', { label: 'Drive', def: 0.45, fmt: pct, apply: v => { pre.gain.value = 1 + v * 7; drv.curve = DSP.curveTanh(v * 0.7); } });
+    m.p('drive', { label: 'Drive', def: 0.45, fmt: pct, apply: v => { smooth(pre.gain, 0.45 * (1 + v * 4)); smooth(post.gain, 1 / (1 + v * 1.1)); } });
     m.p('glide', { label: 'Glide', min: 0, max: 0.4, def: 0.05, fmt: secs });
-    m.p('level', { label: 'Level', def: 0.6, fmt: pct, apply: v => smooth(out.gain, v * 0.9) });
+    m.p('level', { label: 'Level', def: 0.6, fmt: pct, apply: v => smooth(out.gain, v * 1.4) });
     m.lfo = null;
     m.lfoRate = () => E.bpm / 60 * DIVMUL[m.v('wrate')];
     m.retuneLfo = function (restart) {
@@ -459,7 +462,7 @@ const Mods = (() => {
       subO.frequency.cancelScheduledValues(t); subO.frequency.setTargetAtTime(f / 2, t, Math.max(0.001, gl / 3));
       if (!e.slide) {
         this.startLfo(t);
-        envCS.offset.cancelScheduledValues(t); envCS.offset.setValueAtTime(1, t); envCS.offset.setTargetAtTime(0, t + 0.004, this.v('dec') / 3);
+        envCS.offset.cancelScheduledValues(t); envCS.offset.setTargetAtTime(1, t, 0.002); envCS.offset.setTargetAtTime(0, t + 0.008, this.v('dec') / 3);
         vca.gain.cancelScheduledValues(t); vca.gain.setTargetAtTime(0.9 * (e.vel ?? 0.85), t, 0.003);
       } else vca.gain.cancelScheduledValues(t);
       vca.gain.setTargetAtTime(0, t + e.dur, 0.025);

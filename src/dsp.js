@@ -49,12 +49,16 @@ const DSP = (() => {
     { name: 'SUPER', a: shapes.supersaw, b: shapes.pulse(0.12) }
   ];
 
-  function curveTanh(amount) {
+  // Curves are cached by rounded amount, so turning a drive knob does not rebuild (and glitch) the shaper every frame
+  const curveCache = new Map();
+  const memo = (name, fn) => amount => { const q = Math.round(amount * 40) / 40, k = name + q; if (!curveCache.has(k)) curveCache.set(k, fn(q)); return curveCache.get(k); };
+  const curveTanh = memo('t', curveTanhRaw), curveHard = memo('h', curveHardRaw);
+  function curveTanhRaw(amount) {
     const n = 2048, c = new Float32Array(n), k = 1 + amount * 30;
     for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); }
     return c;
   }
-  function curveHard(amount) {
+  function curveHardRaw(amount) {
     const n = 2048, c = new Float32Array(n), k = 1 + amount * 60;
     for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = clamp(x * k, -1, 1) * 0.9 + Math.tanh(x * k) * 0.1; }
     return c;
