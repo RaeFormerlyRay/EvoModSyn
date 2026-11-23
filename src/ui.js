@@ -266,6 +266,7 @@ const UI = (() => {
     }
   };
   U.animated = [];
+  U.customs = customs; U.fitCanvas = fitCanvas; U.h = h; // other files register panel displays here
   let buildingId = null;
   U.anim = f => { f._mod = buildingId; U.animated.push(f); };
   const FIXED = new Set(['clock', 'mixer', 'monitor']);
@@ -274,6 +275,7 @@ const UI = (() => {
   function renderModule(m, isNew) {
     const id = m.id; buildingId = id;
     const el = h('div', 'mod' + (isNew ? ' mod-new' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id;
+    const pk = Panels.key(m); if (pk) { el.style.setProperty('--panel-img', `url("${Panels.url(pk)}")`); el.classList.add('worn'); if (Panels.light(pk)) el.classList.add('light'); }
     el.innerHTML = `<div class="mod-h"><span class="nm">${m.name}</span><span class="sub">${m.sub}</span></div>`;
     if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; x.onclick = () => U.removeModule(id); el.querySelector('.mod-h').append(x); }
     const body = h('div', 'mod-b'); el.append(body);
