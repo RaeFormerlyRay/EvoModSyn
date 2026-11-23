@@ -187,16 +187,24 @@ const UI = (() => {
       ['mode', 'freq', 'q'].forEach(k => m.params[k].listeners.push(upd)); upd();
     },
     drumgrid(m, el) {
+      const top = h('div', 'patrow'), pbs = [];
+      for (let i = 0; i < 8; i++) { const b = h('button', 'pb', 'ABCDEFGH'[i]); b.type = 'button'; b.title = `Drum pattern ${'ABCDEFGH'[i]} (switches at the next bar while playing) · Shift-click: copy the current pattern here`; b.onclick = ev => { if (ev.shiftKey) { m.pats[i] = m.pat.map(r => r.slice()); render(); } else m.queue(i); }; top.append(b); pbs.push(b); }
+      const songBtn = h('button', 'pb song', 'SONG'); songBtn.type = 'button'; songBtn.title = 'Song mode: play the drum chain'; songBtn.onclick = () => m.setSong(null, !m.songOn); top.append(songBtn);
       const g = h('div', 'dgrid'); const cells = [], labels = [];
       m.INST.forEach((ins, r) => {
         const l = h('div', 'rl', ins); l.title = 'Click to mute ' + ins; l.onclick = () => { m.mute[r] = !m.mute[r]; render(); }; g.append(l); labels.push(l);
         cells[r] = [];
         for (let s = 0; s < 16; s++) { const c = h('div', 'dc'); c.onclick = () => { m.pat[r][s] = (m.pat[r][s] + 1) % 3; render(); }; g.append(c); cells[r][s] = c; }
       });
-      const render = () => m.INST.forEach((_, r) => { labels[r].classList.toggle('mute', m.mute[r]); for (let s = 0; s < 16; s++) { const v = m.pat[r][s]; cells[r][s].classList.toggle('on', v > 0); cells[r][s].classList.toggle('acc', v === 2); } });
-      el.append(g); render();
+      const render = () => {
+        m.INST.forEach((_, r) => { labels[r].classList.toggle('mute', m.mute[r]); for (let s = 0; s < 16; s++) { const v = m.pat[r][s]; cells[r][s].classList.toggle('on', v > 0); cells[r][s].classList.toggle('acc', v === 2); } });
+        pbs.forEach((b, i) => { b.classList.toggle('cur', i === (m.view ?? m.cur)); b.classList.toggle('has', m.hasNotes(i)); b.classList.toggle('q', i === m.next); });
+        songBtn.classList.toggle('cur', m.songOn);
+      };
+      el.style.setProperty('--stripe', m.stripe);
+      el.append(top, g); render();
       let cur = -1;
-      m.ui = { renderGrid: render, cells, labels, cursor: p => { if (cur >= 0) cells.forEach(row => row[cur].classList.remove('cur')); cells.forEach(row => row[p].classList.add('cur')); cur = p; } };
+      m.ui = { renderGrid: render, cells, labels, pbs, songBtn, cursor: p => { if (cur >= 0) cells.forEach(row => row[cur].classList.remove('cur')); cells.forEach(row => row[p].classList.add('cur')); cur = p; } };
     },
     modelinfo(m, el) {
       const row = h('div', 'row'), lcd = h('div', 'lcd grow'), led = h('span', 'led'); row.append(lcd, led); el.append(row);
@@ -487,14 +495,14 @@ const UI = (() => {
     return true;
   };
 
-  U.aiCells = async function (els, mod, label, fn) {
+  U.aiCells = async function (els, mod, label, fn, cellMs = 70) {
     if (!els.length) return;
     U.focus(mod);
     const first = elCenter(els[0]);
     await U.handTo(first.x, first.y, label);
     for (let i = 0; i < els.length; i++) {
       const c = elCenter(els[i]);
-      await U.handTo(c.x, c.y, null, 70);
+      await U.handTo(c.x, c.y, null, cellMs);
       fn(i); els[i].classList.add('ai');
       const el = els[i]; setTimeout(() => el.classList.remove('ai'), 900);
     }

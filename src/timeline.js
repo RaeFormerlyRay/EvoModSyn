@@ -74,7 +74,7 @@ const TL = (() => {
   });
   E.on('transport', r => { if (T.recording && !T.applying) { T.events.push({ id: uid(), t: T.pos, kind: 'transport', run: r, src: srcNow() }); dirty(); } });
   // patterns, drum grids and song chains: compare snapshots a few times a second
-  const dataOf = m => m.kind === 'StepSeq' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn } : m.kind === 'Drums' ? { pat: m.pat, mute: m.mute } : null;
+  const dataOf = m => m.kind === 'StepSeq' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn } : m.kind === 'Drums' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn, mute: m.mute } : null;
   const lastData = {}, lastDataEv = {};
   setInterval(() => {
     if (!T.recording) return;
@@ -105,7 +105,7 @@ const TL = (() => {
     const m = E.mods[id]; if (!m || !d) return;
     const c = JSON.parse(JSON.stringify(d));
     if (m.kind === 'StepSeq') { m.pats = c.pats; m.cur = c.cur; m.song = c.song; m.songOn = c.songOn; m.next = null; m.ui?.renderAll(); }
-    if (m.kind === 'Drums') { m.pat = c.pat; m.mute = c.mute; m.ui?.renderGrid(); }
+    if (m.kind === 'Drums') { if (c.pats) { m.pats = c.pats; m.cur = c.cur ?? 0; m.song = c.song || m.song; m.songOn = !!c.songOn; } else if (c.pat) m.pat = c.pat; m.mute = c.mute; m.ui?.renderGrid(); }
     lastData[id] = JSON.stringify(dataOf(m));
   }
   function addMod(id, type, opts = {}) { if (E.mods[id] || !Mods.TYPES[type]) return; UI.createModule(type, { id, ...opts }); }

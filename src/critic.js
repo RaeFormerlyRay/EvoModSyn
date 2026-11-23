@@ -44,7 +44,7 @@ const Critic = (() => {
   function measure(pcm, sr) {
     const N = 4096, hop = 2048, frames = [], win = new Float32Array(N).map((_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)));
     let sq = 0, pk = 0, clip = 0; for (const x of pcm) { sq += x * x; const a = Math.abs(x); if (a > pk) pk = a; if (a > 0.985) clip++; }
-    const chroma = new Float64Array(12), band = [0, 0, 0, 0]; let rough = 0, roughW = 0, flat = 0, cent = 0, flux = 0, prev = null, silent = 0, onsets = 0, fluxes = [];
+    const chroma = new Float64Array(12), band = [0, 0, 0, 0]; let lowmid = 0; let rough = 0, roughW = 0, flat = 0, cent = 0, flux = 0, prev = null, silent = 0, onsets = 0, fluxes = [];
     for (let o = 0; o + N <= pcm.length; o += hop) {
       const re = new Float64Array(N), im = new Float64Array(N); let fe = 0;
       for (let i = 0; i < N; i++) { re[i] = pcm[o + i] * win[i]; fe += pcm[o + i] ** 2; }
@@ -53,7 +53,7 @@ const Critic = (() => {
       const mag = new Float32Array(N / 2); let num = 0, den = 0, lsum = 0, asum = 0, fx = 0;
       for (let k = 1; k < N / 2; k++) {
         const m = Math.hypot(re[k], im[k]); mag[k] = m; const f = k * sr / N, p = m * m;
-        num += f * p; den += p; band[f < 90 ? 0 : f < 300 ? 1 : f < 2500 ? 2 : 3] += p;
+        num += f * p; den += p; band[f < 90 ? 0 : f < 300 ? 1 : f < 2500 ? 2 : 3] += p; if (f >= 120 && f < 450) lowmid += p;
         if (k > 2) { lsum += Math.log(m + 1e-9); asum += m; }
         if (prev) fx += Math.max(0, m - prev[k]);
       }
@@ -74,7 +74,7 @@ const Critic = (() => {
     let key = null, best = -2; for (let r = 0; r < 12; r++) for (const [prof, q] of [[MAJ, 'major'], [MIN, 'minor']]) { const c = corr(chromaN, prof.map((_, i) => prof[(i - r + 12) % 12])); if (c > best) { best = c; key = `${DSP.NOTE_NAMES[r]} ${q}`; } }
     return {
       sec: +(pcm.length / sr).toFixed(1), rmsDb: +(10 * Math.log10(sq / Math.max(1, pcm.length) + 1e-12)).toFixed(1), peakDb: +(20 * Math.log10(pk + 1e-9)).toFixed(1), clipPct: +(clip / Math.max(1, pcm.length) * 100).toFixed(2),
-      sub: +(band[0] / tot).toFixed(2), low: +(band[1] / tot).toFixed(2), mid: +(band[2] / tot).toFixed(2), high: +(band[3] / tot).toFixed(2),
+      lowMid: +(lowmid / tot).toFixed(2), sub: +(band[0] / tot).toFixed(2), low: +(band[1] / tot).toFixed(2), mid: +(band[2] / tot).toFixed(2), high: +(band[3] / tot).toFixed(2),
       centroidHz: Math.round(cent / nf), noisiness: +(flat / nf).toFixed(2), roughness: +(roughW ? rough / roughW : 0).toFixed(3), motion: +flux.toFixed(2), onsetsPerSec: +(onsets / (pcm.length / sr)).toFixed(1), silentPct: Math.round(silent / (nf + silent) * 100),
       heardKey: key, keyConfidence: +best.toFixed(2), chroma: chromaN.map(v => +v.toFixed(3)), frames, sr, N
     };
@@ -144,6 +144,10 @@ const Critic = (() => {
     else if (lowEnd < 0.08 && AI.routed('drums')) { notWorking.push('no weight in the low end'); fixes.push(nudge('drums', 'tune', -0.08, 'deeper kick')); }
     else working.push('balanced low end');
     if (M.high > 0.32 && M.centroidHz > 4200) { notWorking.push(`harsh top end (centre of mass ${M.centroidHz} Hz)`); const vc = AI.voiceCut(); if (vc.length) { const [m, k] = vc[0]; fixes.push(nudge(m, k, -0.12, 'too harsh')); } }
+    // 5b. farty: a buzzy pile-up between 120 and 450 Hz with nothing bright on top
+    const fart = Theory.unfart();
+    if (M.lowMid > 0.5 && M.centroidHz < 900) { notWorking.push(`farty low-mid buzz: ${Math.round(M.lowMid * 100)}% of the energy sits between 120 and 450 Hz`); fixes.push(...fart); if (!fart.length) { const vc = AI.voiceCut(); if (vc.length) { const [m, k] = vc[0]; fixes.push(nudge(m, k, 0.1, 'let some harmonics through so the low end is not a blur')); } } }
+    else if (fart.length) { notWorking.push('a voice is set up to sound farty (low square wave, closed resonant filter or overdriven low notes)'); fixes.push(...fart); }
     // 6. movement
     const prev = C.history[C.history.length - 1]?.metrics;
     if (M.motion < 0.18 && prev && prev.motion < 0.18) { notWorking.push('static for a while: nothing is moving'); const mv = AI.moves['mutate sequence']; if (mv?.ok()) fixes.push(...mv.make()); }
@@ -160,14 +164,14 @@ const Critic = (() => {
     const seqLines = P.seqs.map(s => { const m = E.mods[s.id]; return `${s.id} → ${s.to}: ${s.root} ${s.scale} transpose ${s.trans}, pattern ${'ABCDEFGH'[m.cur]}: ${m.pats[m.cur].map(x => x.g ? x.n : '.').join(' ')}`; }).join('\n') || 'none';
     const cables = E.cables.map(c => `${c.from.mod}.${c.from.port} -> ${c.to.mod}.${c.to.port}`).join('; ');
     const { frames, sr, N, ...nums } = M;
-    const prompt = `You are the ears and taste of an AI performer playing a browser modular synth. You cannot hear audio directly, so below are measurements of the last ${M.sec} seconds of the master output${png ? ', and the attached image is its spectrogram plus a pitch-class (chroma) bar chart' : ''}. Judge it like a demanding producer: what is working, what is not, what is too discordant, what just doesn't sound good. Then fix the worst problems.
+    const prompt = `You are the ears and taste of an AI performer playing a browser modular synth. You cannot hear audio directly, so below are measurements of the last ${M.sec} seconds of the master output${png ? ', and the attached image is its spectrogram plus a pitch-class (chroma) bar chart' : ''}. Judge it like a demanding producer: what is working, what is not, what is too discordant, what just doesn't sound good. Be especially harsh on farty synths (buzzy low square waves, closed resonant filters, blatty short envelopes) and on parts that have looped unchanged for too long. Then fix the worst problems.
 
 TASK: ${AI.prof?.task || 'free play'}
 PERSONALITY: ${AI.prof?.persona || '-'}
 GENRE: ${AI.prof?.genre || '-'}; target energy ${Math.round(AI.target.energy * 100)}%, brightness ${Math.round(AI.target.bright * 100)}%
 
 MEASUREMENTS (JSON): ${JSON.stringify(nums)}
-Notes: roughness is Plomp-Levelt sensory dissonance of the strongest partials (under 0.12 smooth, over 0.22 rough). noisiness is spectral flatness (0 tonal, 1 noise). chroma starts at C. outOfKey is the share of pitched energy outside the scales the sequencers use. Drums and noise sources raise noisiness and blur chroma.
+Notes: lowMid is the share of energy between 120 and 450 Hz; above 0.5 with a low centroid usually means a farty, honky low end. roughness is Plomp-Levelt sensory dissonance of the strongest partials (under 0.12 smooth, over 0.22 rough). noisiness is spectral flatness (0 tonal, 1 noise). chroma starts at C. outOfKey is the share of pitched energy outside the scales the sequencers use. Drums and noise sources raise noisiness and blur chroma.
 
 SEQUENCERS (notes are scale degrees, . = rest):
 ${seqLines}

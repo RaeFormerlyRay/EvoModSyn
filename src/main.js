@@ -47,6 +47,11 @@
   Object.entries(Mods.TYPES).forEach(([k, t]) => { const o = document.createElement('option'); o.value = k; o.textContent = t.label; addSel.append(o); });
   addSel.onchange = () => { const t = addSel.value; addSel.value = ''; if (!t) return; const id = UI.createModule(t); const el = UI.modEls[id]; el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); AI.log('sys', `you added ${E.mods[id].name}`); };
   $('#clearpatch').onclick = () => E.clearCables();
+  // every knob on every module back to its default (patterns and cables stay)
+  $('#resetknobs').onclick = () => {
+    let n = 0; for (const id of E.order) { const m = E.mods[id]; for (const k of m.paramOrder) { const p = m.params[k]; if (Math.abs(p.n - p.defN) > 1e-4) { p.setNorm(p.defN); n++; } } }
+    AI.log('sys', `you reset ${n} knob${n === 1 ? '' : 's'} on ${E.order.length} modules to their defaults`);
+  };
 
   // ----- console -----
   const TASKS = ['Design an acid bass patch', 'Play a full 15 minute acid live performance', 'Design a dubstep wobble bass', 'Play a 5 minute noise set with the geiger counter', 'Make a chiptune groove', 'Design an ambient bell soundscape', 'Make it darker', 'Add the geiger counter'];

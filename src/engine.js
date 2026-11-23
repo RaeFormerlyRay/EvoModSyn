@@ -142,6 +142,17 @@ const Engine = (() => {
   E.clearCables = () => [...E.cables].forEach(c => E.disconnect(c));
   E.cablesFrom = (mod, port) => E.cables.filter(c => c.from.mod === mod && (!port || c.from.port === port));
 
+  // ---------- Song harmony ----------
+  // Segments of chord roots (scale degrees) laid on the 16th-note grid. Sequencers set to follow the song add the
+  // current chord root to every note, so one pattern moves through the progression diatonically.
+  E.harmony = [];
+  E.setHarmony = (start, chords, barsPer = 1) => { E.harmony = E.harmony.filter(h => h.start < start).slice(-3); E.harmony.push({ start, chords: chords.slice(), barsPer }); E.fire('harmony', E.harmony[E.harmony.length - 1]); };
+  E.chordAt = step => {
+    let h = null; for (const s of E.harmony) if (s.start <= step) h = s;
+    if (!h || !h.chords.length) return 0;
+    const i = Math.floor((step - h.start) / (16 * h.barsPer)), n = h.chords.length;
+    return h.chords[((i % n) + n) % n];
+  };
   // ---------- Scheduler ----------
   const LOOK = 0.14;
   function pass() {
@@ -162,7 +173,7 @@ const Engine = (() => {
   }
   // setInterval keeps running when the tab is hidden (throttled), rAF does not
   setInterval(pass, 25);
-  E.start = () => { if (E.running) return; E.running = true; E.step = 0; E.nextTime = ctx.currentTime + 0.06; E.fire('transport', true); };
+  E.start = () => { if (E.running) return; E.running = true; E.step = 0; E.harmony = []; E.nextTime = ctx.currentTime + 0.06; E.fire('transport', true); };
   E.stop = () => { if (!E.running) return; E.running = false; E.fire('transport', false); };
   E.setBpm = (b) => { E.bpm = DSP.clamp(b, 40, 220); E.fire('bpm', E.bpm); };
   return E;

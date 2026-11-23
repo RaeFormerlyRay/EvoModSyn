@@ -25,6 +25,7 @@ const Mods = (() => {
       m.emit('CLK', { kind: 'tick', time: t, step, dur });
       if (step % 4 === 0) m.emit('BEAT', { kind: 'tick', time: t, step: step / 4, dur: dur * 4 });
       if (step % 16 === 0) m.emit('BAR', { kind: 'tick', time: t, step: step / 16, dur: dur * 16 });
+      if (step % 16 === 0) E.fire('bar', { time: t, bar: step / 16, step, dur: dur * 16 });
       if (step % 4 === 0) E.at(t, () => m.ui?.blink(step % 16 === 0));
     };
     m.layout = [{ custom: 'clock' }, { k: ['bpm', 'swing'], c: true }];
@@ -49,6 +50,7 @@ const Mods = (() => {
     m.p('trans', { label: 'Transp', steps: Array.from({ length: 15 }, (_, i) => i - 7), def: 0.5, small: true });
     m.p('gate', { label: 'Gate', min: 0.1, max: 1, def: 0.55, fmt: pct, small: true });
     m.p('prob', { label: 'Prob', min: 0, max: 1, def: 1, fmt: pct, small: true });
+    m.p('follow', { label: 'Harmony', steps: ['FREE', 'SONG'], def: 0, small: true });
     m.p('ratch', { label: 'Ratchet', min: 0, max: 1, def: 0, fmt: pct, small: true });
     m.inEvent('CLK', function (e) { this.advance(e); }, 'clock in');
     m.inEvent('RST', function () { this.pos = -1; this.dirSign = 1; this.inPat = 0; this.loops = 0; this.songIx = 0; if (this.songOn) this.cur = this.song[0].pat; }, 'reset');
@@ -73,6 +75,8 @@ const Mods = (() => {
     };
     m.advance = function (e) {
       const divN = [1, 2, 4, 0.5][this.v('div')];
+      // following the song: restart the pattern on the bar line so switches land on downbeats
+      if (this.v('follow') && e.step != null && e.step % (16 * Math.max(1, divN)) === 0) { this.cnt = 0; if (this.inPat > 0) { this.inPat = 0; this.pos = -1; this.onLoop(e.time); } }
       if (divN >= 1) { if ((this.cnt++ % divN) !== 0) return; }
       const len = this.v('len') + 1, dir = this.params.dir.choice;
       if (this.inPat >= len) { this.inPat = 0; this.onLoop(e.time); }
@@ -87,7 +91,7 @@ const Mods = (() => {
       E.at(t, () => this.ui?.cursor(pos));
       const play = st.g && Math.random() < this.v('prob') * (st.p ?? 1);
       if (!play) { this.prevSlide = false; return; }
-      const midi = 12 * (this.params.oct.choice + 1) + this.v('root') + DSP.degreeToSemi(this.params.scale.choice, st.n + this.params.trans.choice);
+      const midi = 12 * (this.params.oct.choice + 1) + this.v('root') + DSP.degreeToSemi(this.params.scale.choice, st.n + this.params.trans.choice + (this.v('follow') ? E.chordAt(e.step ?? E.step) : 0));
       const reps = (st.r > 1 ? st.r : 1) * (Math.random() < this.v('ratch') ? 2 : 1);
       const legatoNext = st.s;
       const gateDur = legatoNext ? dur * 1.08 : dur * this.v('gate');
@@ -100,7 +104,7 @@ const Mods = (() => {
       this.prevSlide = !!legatoNext;
     };
     m.setStep = function (i, s) { Object.assign(this.steps[i], s); this.ui?.renderSteps(); };
-    m.layout = [{ custom: 'steps' }, { k: ['len', 'dir', 'div', 'root', 'scale', 'oct', 'trans', 'gate', 'prob', 'ratch'], cls: 'kgrid' }];
+    m.layout = [{ custom: 'steps' }, { k: ['len', 'dir', 'div', 'root', 'scale', 'oct', 'trans', 'gate', 'prob', 'ratch', 'follow'], cls: 'kgrid' }];
     return m;
   }
 
@@ -263,9 +267,28 @@ const Mods = (() => {
     m.p('accent', { label: 'Accent', def: 0.6, fmt: pct });
     m.p('trigv', { label: 'Trig→', steps: INST, def: 0 });
     m.p('level', { label: 'Level', def: 0.75, fmt: pct, apply: v => smooth(out.gain, v * 1.1) });
-    m.pat = INST.map(() => Array(16).fill(0)); m.mute = INST.map(() => false); m.pos = -1; m.lvl = INST.map(() => 1);
+    // 8 pattern banks (A–H) with queued switching at the bar line and a song chain, like the step sequencers
+    m.pats = Array.from({ length: 8 }, () => INST.map(() => Array(16).fill(0))); m.cur = 0; m.next = null; m.view = null;
+    Object.defineProperty(m, 'pat', { get() { return this.pats[this.view ?? this.cur]; }, set(v) { this.pats[this.view ?? this.cur] = v; } });
+    m.song = [{ pat: 0, rep: 4 }]; m.songOn = false; m.songIx = 0; m.loops = 0;
+    m.mute = INST.map(() => false); m.pos = -1; m.lvl = INST.map(() => 1);
+    m.hasNotes = i => m.pats[i].some(r => r.some(v => v));
+    m.queue = function (i) { if (!E.running) { this.cur = i; this.next = null; } else this.next = i; this.ui?.renderGrid(); };
+    m.setSong = function (chain, on) {
+      if (chain && chain.length) this.song = chain.map(c => ({ pat: clamp(c.pat | 0, 0, 7), rep: clamp(c.rep | 0 || 1, 1, 64) }));
+      if (on != null) { this.songOn = !!on; if (this.songOn) { this.songIx = 0; this.loops = 0; this.cur = this.song[0].pat; this.next = null; } }
+      this.ui?.renderGrid();
+    };
+    m.inEvent('RST', function () { this.pos = -1; this.loops = 0; this.songIx = 0; if (this.songOn) this.cur = this.song[0].pat; }, 'reset');
     m.inEvent('CLK', function (e) {
-      this.pos = e.step != null ? e.step % 16 : (this.pos + 1) % 16;
+      const np = e.step != null ? e.step % 16 : (this.pos + 1) % 16;
+      if (np === 0 && this.pos >= 0) { // bar line: pattern switches happen here
+        this.loops++;
+        if (this.songOn) { if (this.loops >= this.song[this.songIx].rep) { this.songIx = (this.songIx + 1) % this.song.length; this.loops = 0; this.cur = this.song[this.songIx].pat; } }
+        else if (this.next != null) { this.cur = this.next; this.next = null; this.loops = 0; }
+        E.at(e.time, () => this.ui?.renderGrid());
+      }
+      this.pos = np;
       const p = this.pos, t = e.time;
       E.at(t, () => this.ui?.cursor(p));
       INST.forEach((ins, i) => { const v = this.pat[i][p]; if (v && !this.mute[i]) this.hit(ins, t, v === 2 ? 1 : 0.7); });

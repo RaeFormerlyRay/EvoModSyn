@@ -22,6 +22,7 @@
   <button class="btn" id="cabview" title="Change cable visibility">Cables 100%</button>
   <button class="btn" id="resetpatch" title="Load the starter patch">Starter patch</button>
   <button class="btn" id="clearpatch" title="Remove every cable">Clear cables</button>
+  <button class="btn" id="resetknobs" title="Turn every knob on every module back to its default">Reset knobs</button>
 </header>
 
 <main class="app">
@@ -40,6 +41,12 @@
       <select id="brain" class="grow" aria-label="AI brain">
         <option value="local">Brain: built-in learning performer</option>
         <option value="claude">Brain: Claude plans, built-in performer listens</option>
+      </select>
+    </div>
+    <div class="row">
+      <select id="form" class="grow" aria-label="Song form">
+        <option value="auto">Song: automatic (verse / chorus by default)</option>
+        <option value="off">No song form: loop and evolve patterns</option>
       </select>
     </div>
     <div class="row">
@@ -67,7 +74,7 @@
     </div>
 
     <div>
-      <h2>Set timeline</h2>
+      <h2>Song map</h2>
       <div class="timeline" id="timeline"><div class="sec">No performance running</div></div>
       <div class="tl-meta"><span id="tlnow">0:00</span><span id="tlsec">—</span><span id="tlend">0:00</span></div>
     </div>
@@ -112,7 +119,9 @@
 <script src="src/panels.js"></script>
 <script src="src/ui.js"></script>
 <script src="src/modxui.js"></script>
+<script src="src/theory.js"></script>
 <script src="src/ai.js"></script>
+<script src="src/song.js"></script>
 <script src="src/critic.js"></script>
 <script src="src/timeline.js"></script>
 <script src="src/main.js"></script>

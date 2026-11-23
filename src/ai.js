@@ -182,13 +182,19 @@ const AI = (() => {
           UI.removeModule(a.mod); A.log('act', `<b>remove module</b> ${esc(m.name)}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
-        case 'drums': {
-          const m = E.mods.drums, r = m.INST.indexOf(String(a.inst).toUpperCase()); if (r < 0) break;
-          const pat = String(a.pattern || '').padEnd(16, '.').slice(0, 16);
-          const changed = []; for (let s = 0; s < 16; s++) { const v = pat[s] === 'X' ? 2 : (pat[s] === 'x' || pat[s] === 'o') ? 1 : 0; if (v !== m.pat[r][s]) changed.push([s, v]); }
+        case 'drums': case 'drumbank': {
+          // one instrument ("drums") or a whole bank ("drumbank": rows {BD: 'x...'}; missing rows are cleared)
+          const m = E.mods.drums; if (!m) break;
+          const bi = a.pat == null ? (m.view ?? m.cur) : patIx(a.pat); if (bi < 0) break;
+          const rows = a.do === 'drumbank' ? Object.fromEntries(m.INST.map(ins => [ins, (a.rows || {})[ins] || ''])) : { [String(a.inst).toUpperCase()]: a.pattern };
+          const changed = [];
+          for (const [ins, txt] of Object.entries(rows)) { const r = m.INST.indexOf(ins); if (r < 0) continue; const pat = String(txt || '').padEnd(16, '.').slice(0, 16); for (let s = 0; s < 16; s++) { const v = pat[s] === 'X' ? 2 : (pat[s] === 'x' || pat[s] === 'o') ? 1 : 0; if (v !== m.pats[bi][r][s]) changed.push([r, s, v]); } }
           if (!changed.length) break;
-          await UI.aiCells(changed.map(([s]) => m.ui.cells[r][s]), 'drums', `write ${a.inst} pattern`, i => { const [s, v] = changed[i]; m.pat[r][s] = v; m.ui.renderGrid(); });
-          A.log('act', `<b>drums</b> ${esc(a.inst)} ${esc(pat)}${a.why ? ' · ' + esc(a.why) : ''}`);
+          const L = 'ABCDEFGH'[bi], other = bi !== m.cur;
+          if (other) { await UI.aiPoint(m.ui.pbs[bi], 'drums', `edit drum pattern ${L}`); m.view = bi; m.ui.renderGrid(); }
+          await UI.aiCells(changed.map(([r, s]) => m.ui.cells[r][s]), 'drums', a.do === 'drumbank' ? `write drum pattern ${L}` : `write ${a.inst} pattern`, i => { const [r, s, v] = changed[i]; m.pats[bi][r][s] = v; m.ui.renderGrid(); }, a.fast ? 25 : 70);
+          if (other) { m.view = null; m.ui.renderGrid(); }
+          A.log('act', a.do === 'drumbank' ? `<b>drums</b> pattern ${L}: ${esc(Object.entries(rows).filter(([, v]) => v && /[xX]/.test(v)).map(([k]) => k).join(' '))}${a.why ? ' · ' + esc(a.why) : ''}` : `<b>drums</b> ${esc(a.inst)} ${esc(rows[String(a.inst).toUpperCase()])}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
         case 'mute': {
@@ -241,7 +247,13 @@ const AI = (() => {
     await run({ do: 'patch', from: `${id}.OUT`, to: `monitor.${port}`, why: 'second mixer to the speakers' });
     return id;
   }
-  async function runAll(list) { for (const a of list) { if (A.abort) return; await run(a); } }
+  // one hand: the performer, the song planner and the critic take turns, one action list at a time
+  let handLock = Promise.resolve();
+  function runAll(list) {
+    const go = handLock.then(async () => { for (const a of list) { if (A.abort) return; await run(a); } });
+    handLock = go.catch(() => {});
+    return go;
+  }
 
   // ======================= READING THE BRIEF =======================
   const GENRES = {
@@ -410,7 +422,7 @@ const AI = (() => {
       return [P('clock.CLK', 'seq1.CLK'), P('seq1.NOTE', 'acid.NOTE', 'sequencer plays the acid voice'),
         K('seq1', 'scale', keyScale(p, rnd() < 0.7 ? 'dark' : null)), K('seq1', 'root', keyRoot(p)), K('seq1', 'oct', 2), K('seq1', 'len', 16), K('seq1', 'gate', clamp(0.35 + rnd() * 0.3)),
         { do: 'steps', mod: 'seq1', ...line, why: 'acid line: ' + line.idea },
-        K('acid', 'model', 'ACID'), K('acid', 'wave', agg(p) > 0.5 ? 'SQR' : 'SAW'), K('acid', 'cutoff', 0.3, 'start fairly closed so the sweeps have room'), K('acid', 'res', clamp(0.68 + agg(p) * 0.25)),
+        K('acid', 'model', 'ACID'), K('acid', 'wave', agg(p) > 0.75 && rnd() < 0.4 ? 'SQR' : 'SAW'), K('acid', 'cutoff', 0.3, 'start fairly closed so the sweeps have room'), K('acid', 'res', clamp(0.68 + agg(p) * 0.25)),
         K('acid', 'env', 0.6), K('acid', 'decay', 0.32), K('acid', 'accent', 0.75), K('acid', 'drive', clamp(0.2 + agg(p) * 0.7)), K('acid', 'sub', 0.0),
         { do: 'route', mod: 'acid', level: 0.72, send: 0.18 }];
     },
@@ -571,7 +583,7 @@ const AI = (() => {
       P('clock.CLK', `${seq}.CLK`), P(`${seq}.NOTE`, `${vid}.NOTE`),
       K(seq, 'scale', keyScale(p)), K(seq, 'root', keyRoot(p)), K(seq, 'oct', low ? 1 : 3), K(seq, 'gate', low ? 0.8 : 0.5),
       K(seq, 'len', low ? 16 : base.len), { do: 'pattern', mod: seq, pat: 'A', ...base, why: 'new layer: ' + base.idea },
-      ...songify(seq, base, songOn),
+      ...(A.songForm ? [] : songify(seq, base, songOn)),
       { do: 'route', mod: vid, level: low ? 0.55 : 0.45, send: low ? 0.1 : 0.4 }];
     if (type === 'Analog') acts.push(K(vid, 'cutoff', 0.45), K(vid, 'res', 0.35 + p.tr.aggression * 0.3));
     if (type === 'Bodies') acts.push(K(vid, 'model', pick(['BELL', 'MARIMBA', 'GLASS', 'STRING'])));
@@ -687,7 +699,7 @@ const AI = (() => {
 
   async function shapeOnce(reason) {
     const want = { energy: target.energy - ears.energy, bright: target.bright - ears.bright, loud: (target.loud - ears.rms) / 12, bored: Math.min(1.2, (performance.now() - (A.lastNovel || 0)) / 40000) };
-    const cands = Object.entries(MOVES).filter(([, mv]) => { try { return mv.ok(); } catch (e) { return false; } });
+    const cands = Object.entries(MOVES).filter(([name, mv]) => { if (A.blocked.has(name)) return false; try { return mv.ok(); } catch (e) { return false; } });
     if (!cands.length) return;
     cands.sort((a, b) => score(b[0], b[1], want) - score(a[0], a[1], want));
     const [name, mv] = cands[0];
@@ -783,7 +795,8 @@ Reply with JSON only:
 {"summary":"one sentence","targets":{"energy":0-1,"brightness":0-1},
  "design":[30-70 actions that build the patch from the current state, starting with a say, ending with transport run true],
  "sections":${p.mode === 'perform' ? '[5-9 sections, each {"name":"...","fraction":share of the set,"energy":0-1,"actions":[3-10 actions fired when the section starts]}]' : '[]'}}
-Build complex, layered patches: add extra sequencers and voices when they serve the music, give sequencers several patterns and a song. Make it musical and true to the personality. Be spontaneous with melodies: invent fresh motifs instead of stock riffs, vary rhythm (syncopation, rests, odd groupings, call and response), use leaps as well as steps, develop ideas across patterns (invert, transpose, answer, displace), and pick an unexpected key or mode when it suits. Random seed for this plan: ${Math.floor(rnd() * 1e6)}. Use the modules the task and personality call for.`;
+${Theory.PRIMER}
+${A.songForm ? 'A song engine will arrange the song form after your design (verse, build, chorus and so on), so design the sound and the main patterns; leave "sections" empty.\n' : ''}Build complex, layered patches: add extra sequencers and voices when they serve the music, give sequencers several patterns and a song. Make it musical and true to the personality. Be spontaneous with melodies: invent fresh motifs instead of stock riffs, vary rhythm (syncopation, rests, odd groupings, call and response), use leaps as well as steps, develop ideas across patterns (invert, transpose, answer, displace), and pick an unexpected key or mode when it suits. Random seed for this plan: ${Math.floor(rnd() * 1e6)}. Use the modules the task and personality call for.`;
     A.think('Asking Claude', 'Claude is composing a plan for the patch and the set. This can take up to a minute.');
     A.log('sys', 'sent the brief, module catalog and current patch to Claude');
     let chars = 0;
@@ -803,6 +816,7 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
     if (A.busy) return;
     A.abort = false; setBusy(true);
     const p = parseBrief(task, persona); A.prof = p;
+    if (p.mode !== 'tweak') Song.stop(); A.songForm = Song.choice(p);
     A.startT = performance.now(); A.endT = A.startT + Math.max(p.dur, 60) * 1000; A.sections = null; drawTimeline();
     A.stateName = 'Reading the brief';
     A.log('sys', `<b>${esc(task)}</b> — as: ${esc(persona)}`);
@@ -828,7 +842,7 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
         // every main sequencer gets B/C/D patterns and a song; song mode plays it for designs, the performer switches by hand in a set
         const songOn = p.mode !== 'perform';
         const extra = [];
-        acts.filter(a => a.do === 'steps').forEach(a => { a.do = 'pattern'; a.pat = 'A'; extra.push(...songify(a.mod, a, songOn)); });
+        acts.filter(a => a.do === 'steps').forEach(a => { a.do = 'pattern'; a.pat = 'A'; if (!A.songForm) extra.push(...songify(a.mod, a, songOn)); });
         acts = acts.concat(extra);
         const reserved = new Set(CORE_IDS);
         for (let i = 0; i < p.complex; i++) acts = acts.concat(newLayer(p, reserved, songOn || p.songWanted));
@@ -849,6 +863,7 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
       if (!plan) await run({ do: 'transport', run: true });
       await runAll(acts);
       if (!E.running) await run({ do: 'transport', run: true });
+      { const f = Theory.unfart('sound design check: no farty synths'); if (f.length && !A.abort) { A.log('sys', 'checking the sound design: avoiding farty, blatty synth settings'); await runAll(f); } }
     } else {
       // tweak: change targets from adjectives
       const t = task;
@@ -872,7 +887,22 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
     }
     if (A.abort) return finish();
 
-    if (p.mode === 'perform') {
+    // song structure: plan the form and the first section, then the song engine runs on the bar line
+    if (A.songForm && p.mode !== 'tweak') { A.stateName = 'Arranging the song'; if (!(await Song.begin(p, { loop: p.mode !== 'perform' }))) A.songForm = null; }
+    if (A.abort) return finish();
+
+    if (p.mode === 'perform' && A.songForm) {
+      A.stateName = 'Performing the song';
+      await Song.performLoop(p);
+      if (!A.abort) {
+        A.stateName = 'Ending the set'; A.think('Ending the set', 'The song is over. Fading out and stopping the clock.');
+        Song.stop();
+        await run(K('mixer', 'master', 0.05, 'fade out', 6000));
+        await run({ do: 'transport', run: false });
+        await run(K('mixer', 'master', 0.8, 'reset the master for next time', 400));
+        A.log('sys', 'song finished');
+      }
+    } else if (p.mode === 'perform') {
       const src = plan && Array.isArray(plan.sections) && plan.sections.length ? plan.sections.map(s => [s.name || 'Section', +s.fraction || 1 / plan.sections.length, clamp(+s.energy || 0.5), s.actions || []]) : ARC.map(a => [...a, null]);
       const tot = src.reduce((a, s) => a + s[1], 0); let acc = 0;
       A.sections = src.map(([name, frac, energy, acts]) => { const o = { name, frac: frac / tot, start: acc, energy: clamp(energy * (1 - p.tr.calm * 0.35) + p.tr.aggression * 0.08), acts }; acc += o.frac; return o; });
@@ -907,7 +937,7 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
       A.stateName = 'Listening and tuning';
       const n = p.mode === 'tweak' ? 6 : 5;
       for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
-      if (!A.abort) { A.think('Patch ready', `Done. The ${p.genre} patch keeps playing. Ask for changes like "make it darker" or "add the geiger counter", or run a live set.`); A.log('sys', 'patch ready'); }
+      if (!A.abort) { A.think('Patch ready', A.songForm ? `Done. The ${p.genre} song keeps playing and I keep writing each next section while it loops. Ask for changes, or run a live set.` : `Done. The ${p.genre} patch keeps playing. Ask for changes like "make it darker" or "add the geiger counter", or run a live set.`); A.log('sys', 'patch ready'); }
     }
     finish();
   };
@@ -915,9 +945,10 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
     if (A.abort) { A.think('Stopped', 'You stopped the AI. The patch keeps playing as it is.'); A.log('sys', 'stopped by you'); }
     A.sections = A.sections && !A.abort ? A.sections : A.sections; setBusy(false);
   }
-  A.stop = () => { A.abort = true; };
+  A.stop = () => { A.abort = true; Song.stop(); };
   // ----- hooks for the self-critic (critic.js) -----
-  A.fixQueue = [];
+  A.fixQueue = []; A.blocked = new Set();
+  A.runAll = runAll; A.variation = variation; A.setBusy = setBusy; A.shapeOnce = shapeOnce; A.fmtT = fmtT;
   A.catalog = catalog; A.target = target; A.moves = MOVES; A.activeSeqs = activeSeqs; A.routed = routed; A.voiceCut = voiceCut;
   // run fixes now if the AI is idle, otherwise hand them to the performer between moves
   A.applyFixes = async function (list) {
