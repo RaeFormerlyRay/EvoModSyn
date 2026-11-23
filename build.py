@@ -8,6 +8,10 @@ body = body.replace('<link rel="stylesheet" href="src/style.css">', '<style>\n' 
 def js(m):
     return '<script>\n' + (root / m.group(1)).read_text() + '\n</script>'
 body = re.sub(r'<script src="(src/[a-z]+\.js)"></script>', js, body)
+# inline the worn panel textures as data URIs
+import base64
+panels = ','.join(f"'{f.stem}':'data:image/webp;base64,{base64.b64encode(f.read_bytes()).decode()}'" for f in sorted((root / 'assets/panels').glob('*.webp')))
+body = body.replace('{/*BUILD:PANELS*/}', '{' + panels + '}')
 out = root / 'dist' / 'patchmind.html'
 out.parent.mkdir(exist_ok=True)
 out.write_text(body.strip() + '\n')

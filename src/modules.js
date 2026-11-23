@@ -503,10 +503,12 @@ const Mods = (() => {
     const o = ctx.createOscillator(), og = gain(1), ns = ctx.createBufferSource(), ng = gain(0), cr = shaper(DSP.curveCrush(6)), vca = gain(0), out = gain(0.5);
     const vib = ctx.createOscillator(), vg = gain(0); vib.frequency.value = 5.8; vib.connect(vg); vg.connect(o.detune); vib.start();
     o.setPeriodicWave(waves.P25); o.start(); ns.buffer = E.lfsr; ns.loop = true; ns.start();
+    // a second, short-loop LFSR for METAL (a source's buffer can only be set once)
+    const ns2 = ctx.createBufferSource(), ng2 = gain(0); ns2.buffer = E.lfsrShort; ns2.loop = true; ns2.start(); ns2.connect(ng2); ng2.connect(cr);
     o.connect(og); ns.connect(ng); og.connect(cr); ng.connect(cr); cr.connect(vca); vca.connect(out);
     const ARPS = { OFF: [0], MAJ: [0, 4, 7], MIN: [0, 3, 7], OCT: [0, 12], POW: [0, 7, 12], DIM: [0, 3, 6], '7TH': [0, 4, 7, 10] };
     m.p('wave', { label: 'Wave', steps: ['P12', 'P25', 'P50', 'TRI', 'NOISE', 'METAL'], def: 0.2, apply: (v, p) => {
-      const w = p.choice; if (waves[w]) { o.setPeriodicWave(waves[w]); og.gain.value = 1; ng.gain.value = 0; } else { ns.buffer = w === 'METAL' ? E.lfsrShort : E.lfsr; og.gain.value = 0; ng.gain.value = 0.7; }
+      const w = p.choice; if (waves[w]) { o.setPeriodicWave(waves[w]); og.gain.value = 1; ng.gain.value = 0; ng2.gain.value = 0; } else { og.gain.value = 0; ng.gain.value = w === 'METAL' ? 0 : 0.7; ng2.gain.value = w === 'METAL' ? 0.7 : 0; }
     } });
     m.p('arp', { label: 'Arp', steps: Object.keys(ARPS), def: 0 });
     m.p('arate', { label: 'Arp Spd', steps: [1, 2, 3, 4, 6], def: 0.25, fmt: v => v + 'f' });
@@ -521,11 +523,11 @@ const Mods = (() => {
       const t = Math.max(e.time, now()); this.last = e.midi;
       const midi = e.midi + 12 * this.params.oct.choice, iv = ARPS[this.params.arp.choice], frame = this.params.arate.choice / 60;
       const dur = Math.min(e.dur, 2), dec = this.v('decay');
-      o.frequency.cancelScheduledValues(t); ns.playbackRate.cancelScheduledValues(t);
+      o.frequency.cancelScheduledValues(t); ns.playbackRate.cancelScheduledValues(t); ns2.playbackRate.cancelScheduledValues(t);
       let k = 0;
       for (let tt = t; tt < t + dur; tt += iv.length > 1 ? frame : dur + 1) {
         const f = mtof(midi + iv[k++ % iv.length]);
-        o.frequency.setValueAtTime(f, tt); ns.playbackRate.setValueAtTime(clamp(f / 300, 0.02, 8), tt);
+        o.frequency.setValueAtTime(f, tt); ns.playbackRate.setValueAtTime(clamp(f / 300, 0.02, 8), tt); ns2.playbackRate.setValueAtTime(clamp(f / 300, 0.02, 8), tt);
       }
       vca.gain.cancelScheduledValues(t);
       for (let i = 0; i * (1 / 60) < dur; i++) vca.gain.setValueAtTime(Math.round(15 * Math.exp(-i / 60 / dec)) / 15 * 0.8 * (e.vel ?? 0.8), t + i / 60);

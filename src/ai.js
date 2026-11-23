@@ -381,20 +381,46 @@ const AI = (() => {
         K('vcfq', 'mode', 'BP'), K('vcfq', 'q', 0.7), { do: 'route', mod: 'vcfq', level: 0.45, send: 0.3 }];
     },
     geigerDrums() { return [P('geiger.TRIG', 'drums.TRIG', 'random decays fire extra drum hits'), K('drums', 'trigv', pick(['RS', 'CP', 'CB', 'SD']))]; },
-    slopeTo(dest) { return [K('slope', 'cycle', 'ON'), K('slope', 'rise', 0.62), K('slope', 'fall', 0.68), K('slope', 'level', 0.75), P('slope.OUT', dest, 'slow slope modulates the filter')]; }
+    slopeTo(dest) { return [K('slope', 'cycle', 'ON'), K('slope', 'rise', 0.62), K('slope', 'fall', 0.68), K('slope', 'level', 0.75), P('slope.OUT', dest, 'slow slope modulates the filter')]; },
+    // ----- the wishlist modules -----
+    contourEnv(voice, trig) {
+      return [{ do: 'add', type: 'Contour', id: 'contour', why: 'a function generator to shape the filter' }, P(trig, 'contour.TRIG1', 'every note fires the envelope'),
+        K('contour', 'r1', 0.15), K('contour', 'f1', clamp(0.5 + rnd() * 0.12)), K('contour', 'c1', 0.85, 'snappy exponential curve'), K('contour', 'l1', 0.8), P('contour.OUT1', voice + '.CUT', 'envelope opens the filter on each note')];
+    },
+    swarmTo(dests, sync = '2 BAR') {
+      return [{ do: 'add', type: 'Swarm', id: 'swarm', why: 'eight related LFOs for slow movement' }, K('swarm', 'sync', sync), K('swarm', 'spread', 0.25), K('swarm', 'phase', 1), K('swarm', 'depth', 0.35),
+        ...dests.map((d, i) => P(`swarm.O${i * 3 + 1}`, d, 'each destination drifts at its own phase'))];
+    },
+    grainsOn(src, o = {}) {
+      return [{ do: 'add', type: 'Grains', id: 'grains', why: 'a granular processor to turn the voice into texture' }, P(`${src}.OUT`, 'grains.IN', 'feed the voice into the grains'),
+        K('grains', 'size', o.size ?? 0.6), K('grains', 'dens', o.dens ?? 0.55), K('grains', 'pitch', o.pitch ?? '0'), K('grains', 'spray', o.spray ?? 0.3), K('grains', 'fb', o.fb ?? 0.05), K('grains', 'mix', 1, 'all wet, the dry voice has its own channel'),
+        { do: 'route', mod: 'grains', level: o.level ?? 0.5, send: o.send ?? 0.4 }];
+    },
+    workoutDrums(inst, rate, eu, prob) {
+      return [{ do: 'add', type: 'Workout', id: 'work', why: 'a clock brain for polyrhythmic extra hits' }, P('clock.CLK', 'work.CLK', 'the clock brain follows the master clock'),
+        K('work', 'r8', rate), K('work', 'e8', String(eu)), K('work', 'p8', prob), P('work.O8', 'drums.TRIG', `euclidean ${eu}-hit pattern on top of the grid`), K('drums', 'trigv', inst)];
+    },
+    marblesLayer(p, voice) {
+      return [{ do: 'add', type: 'Marbles', id: 'marbles', why: 'a random generator that stays in key' }, P('clock.CLK', 'marbles.CLK'), K('marbles', 'div', pick(['1/8', '1/16', '1/4'])),
+        K('marbles', 'scale', p.tr.dark > 0 ? 'MINOR' : 'PENT'), K('marbles', 'steps', 'QUANT'), K('marbles', 'deja', clamp(0.8 - p.tr.chaos * 0.5), 'how often the loop repeats itself'), K('marbles', 'spread', clamp(0.3 + p.tr.chaos * 0.5)),
+        P('marbles.NOTE', voice + '.NOTE', 'random notes, quantized, looping with déjà vu'), { do: 'route', mod: voice, level: 0.45, send: 0.35 }];
+    },
+    shTo(dest, trig) {
+      return [{ do: 'add', type: 'Toolbox', id: 'tools', why: 'sample and hold for stepped random modulation' }, P(trig, 'tools.TRIG', 'sample a new random value'), K('tools', 'slew', 0.3), P('tools.HOLD', dest, 'stepped random voltage')];
+    }
   };
 
   const RECIPES = {
-    acid: p => ({ bpm: 128 + Math.round(rnd() * 8), kit: '909', acts: [...L.drums(p, 'acid', '909'), ...L.acid(p), ...(cha(p) > 0.45 || agg(p) > 0.6 ? L.geiger(p) : []), ...(p.mode === 'perform' ? L.slopeTo('acid.CUT') : [])] }),
-    dubstep: p => ({ bpm: 140, acts: [...L.drums(p, 'half', '909'), ...L.titan(p, true), ...(cha(p) > 0.45 ? [...L.geiger(p), ...L.geigerDrums()] : [])] }),
-    dnb: p => ({ bpm: 172, acts: [...L.drums(p, 'dnb', '909'), ...L.titan(p, false, 'reese'), ...L.bodies(p, 'GLASS', 4)] }),
-    techno: p => ({ bpm: 130, acts: [...L.drums(p, 'techno', '909'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'decay', 0.2), ...L.bodies(p, 'MEMBRANE', 1), ...L.slopeTo('acid.CUT')] }),
-    house: p => ({ bpm: 124, acts: [...L.drums(p, 'house', '909'), ...L.lead(p, 'JOVE'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'res', 0.3)] }),
+    acid: p => ({ bpm: 128 + Math.round(rnd() * 8), kit: '909', acts: [...L.drums(p, 'acid', '909'), ...L.acid(p), ...L.workoutDrums('RS', '1/16', 5, 0.85), ...(cha(p) > 0.45 || agg(p) > 0.6 ? L.geiger(p) : []), ...(p.mode === 'perform' ? L.slopeTo('acid.CUT') : [])] }),
+    dubstep: p => ({ bpm: 140, acts: [...L.drums(p, 'half', '909'), ...L.titan(p, true), ...L.workoutDrums('CH', '1/16T', 7, 0.6), ...(cha(p) > 0.45 ? [...L.geiger(p), ...L.geigerDrums()] : [])] }),
+    dnb: p => ({ bpm: 172, acts: [...L.drums(p, 'dnb', '909'), ...L.titan(p, false, 'reese'), ...L.bodies(p, 'GLASS', 4), ...L.swarmTo(['titan.CUT'], '1 BAR')] }),
+    techno: p => ({ bpm: 130, acts: [...L.drums(p, 'techno', '909'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'decay', 0.2), ...L.bodies(p, 'MEMBRANE', 1), ...L.slopeTo('acid.CUT'), ...L.workoutDrums('CB', '1/16', 3, 0.9), ...L.grainsOn('bodies', { size: 0.45, dens: 0.4, level: 0.35, send: 0.5 })] }),
+    house: p => ({ bpm: 124, acts: [...L.drums(p, 'house', '909'), ...L.lead(p, 'JOVE'), ...L.contourEnv('lead', 'seq2.GATE'), K('lead', 'cutoff', 0.35, 'closed down so the envelope plucks it'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'res', 0.3)] }),
     chip: p => ({ bpm: 150, acts: [...L.drums(p, 'chip', 'LOFI'), ...L.chip(p), ...L.lead(p, 'SEM'), K('seq2', 'oct', 1)] }),
-    ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, 'BELL', 4), ...L.slopeTo('lead.CUT'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
-    noise: p => ({ bpm: 145, acts: [...L.drums(p, 'noise', 'DIRT'), ...L.geiger(p), ...L.geigerDrums(), ...L.titan(p, true), K('titan', 't1', 'METAL'), P('ent.CV', 'titan.CUT', 'random voltages tear at the bass filter'), P('clock.CLK', 'ent.CLK')] }),
-    trap: p => ({ bpm: 140, acts: [...L.drums(p, 'trap', '808'), K('drums', 'decay', 0.9), K('drums', 'tune', 0.35), ...L.lead(p, 'PROPHECY')] }),
-    experimental: p => ({ bpm: 100, acts: [...L.bodies(p, 'STRING', 1), ...L.geiger(p), P('geiger.TRIG', 'slope.TRIG'), K('slope', 'cycle', 'OFF'), P('ent.CV', 'fold.FOLD', 'noise CV animates the folds'), ...L.chip(p), K('chip', 'wave', 'METAL'), K('mixer', 'l5', 0.35)] })
+    ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, 'BELL', 4), ...L.slopeTo('lead.CUT'), ...L.grainsOn('bodies', { size: 0.85, dens: 0.6, pitch: '+12', spray: 0.6, fb: 0.35, level: 0.55, send: 0.7 }), ...L.swarmTo(['grains.POS', 'grains.DENS'], '4 BAR'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
+    noise: p => ({ bpm: 145, acts: [...L.drums(p, 'noise', 'DIRT'), ...L.geiger(p), ...L.geigerDrums(), ...L.titan(p, true), K('titan', 't1', 'METAL'), P('ent.CV', 'titan.CUT', 'random voltages tear at the bass filter'), P('clock.CLK', 'ent.CLK'), ...L.shTo('fold.FOLD', 'geiger.TRIG'), ...L.grainsOn('titan', { size: 0.3, dens: 0.8, pitch: '-12', spray: 0.8, fb: 0.5, level: 0.4, send: 0.2 })] }),
+    trap: p => ({ bpm: 140, acts: [...L.drums(p, 'trap', '808'), K('drums', 'decay', 0.9), K('drums', 'tune', 0.35), ...L.lead(p, 'PROPHECY'), ...L.workoutDrums('CH', '1/32', 11, 0.55)] }),
+    experimental: p => ({ bpm: 100, acts: [...L.bodies(p, 'STRING', 1), ...L.geiger(p), P('geiger.TRIG', 'slope.TRIG'), K('slope', 'cycle', 'OFF'), P('ent.CV', 'fold.FOLD', 'noise CV animates the folds'), ...L.chip(p), K('chip', 'wave', 'METAL'), K('mixer', 'l5', 0.35), ...L.marblesLayer(p, 'lead'), K('lead', 'model', 'PROPHECY'), ...L.contourEnv('lead', 'marbles.T1'), K('contour', 'cy2', 'ON'), P('contour.OUT2', 'vcfq.CV', 'cycling function sweeps the filter'), ...L.shTo('lead.FM', 'marbles.T3')] })
   };
 
   // ======================= SOUND-SHAPING MOVES (the learning part) =======================
@@ -403,7 +429,7 @@ const AI = (() => {
   const voiceCut = () => E.order.filter(id => CUTKEY[E.mods[id].kind] && routed(id)).map(id => [id, CUTKEY[E.mods[id].kind]]);
   const activeSeqs = () => E.order.filter(id => kindIs(id, 'StepSeq') && E.cablesFrom(id, 'NOTE').length);
   const VOICE_KINDS = ['Analog', 'Titan', 'Chip', 'Bodies', 'VCFQ'];
-  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq'];
+  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq', 'contour', 'swarm', 'work', 'grains', 'marbles', 'tools'];
 
   // ----- pattern variations and songs -----
   function variation(notes, kind) {
@@ -448,6 +474,16 @@ const AI = (() => {
   A.newLayer = newLayer;
   const nudge = (mod, key, d, why, ms) => { const p = E.mods[mod].params[key]; return K(mod, key, clamp(p.n + d), why, ms); };
   const drumsOn = () => routed('drums');
+  const canAdd = () => E.order.length <= 26 && performance.now() - (A.lastAdd || 0) > 40000;
+  const freeIn = s => { const [m, port] = s.split('.'); return E.mods[m] && !E.findCable(m, port); };
+  // voices whose filter has a free CUT input, with the gate that plays them
+  const envTargets = () => ['acid', 'lead', 'titan'].filter(v => routed(v) && freeIn(v + '.CUT')).map(v => {
+    const c = E.cables.find(c => c.to.mod === v && c.to.port === 'NOTE'), src = c && E.mods[c.from.mod];
+    return [v, src?.kind === 'StepSeq' ? `${c.from.mod}.GATE` : src?.kind === 'Marbles' ? `${c.from.mod}.T2` : 'clock.BEAT'];
+  });
+  const freeCV = () => ['acid.CUT', 'lead.CUT', 'titan.CUT', 'vcfq.CV', 'fold.FOLD', 'grains.POS', 'grains.DENS'].filter(d => freeIn(d) && (routed(d.split('.')[0]) || d.startsWith('fold') && E.findCable('fold', 'IN') || d.startsWith('grains')));
+  const grainSources = () => ['bodies', 'lead', 'acid', 'chip', 'titan'].filter(routed);
+  const idleVoices = () => ['bodies', 'chip', 'lead'].filter(v => E.mods[v] && !E.findCable(v, 'NOTE'));
   const MOVES = {
     'open filter': { fx: { energy: 0.5, bright: 1 }, ok: () => voiceCut().length, make: () => { const [m, k] = pick(voiceCut()); return [nudge(m, k, 0.08 + rnd() * 0.2, 'wants more brightness', 1500 + rnd() * 2500)]; } },
     'close filter': { fx: { energy: -0.4, bright: -1 }, ok: () => voiceCut().some(([m, k]) => E.mods[m].params[k].n > 0.27), make: () => { const [m, k] = pick(voiceCut().filter(([m, k]) => E.mods[m].params[k].n > 0.27)); const p = E.mods[m].params[k]; return [K(m, k, Math.max(0.24, p.n - (0.08 + rnd() * 0.2)), 'too bright, pulling it back', 1500 + rnd() * 2000)]; } },
@@ -500,6 +536,25 @@ const AI = (() => {
       return [{ do: 'pattern', mod: id, pat: slot, ...v, accents: m.pats[m.cur].map((s, i) => s.a ? i : -1).filter(i => i >= 0), why: 'write a new variation' }, { do: 'select', mod: id, pat: slot }];
     } },
     'add layer': { fx: { energy: 0.6, novelty: 1.3 }, ok: () => E.order.length <= 26 && performance.now() - (A.lastAdd || 0) > 45000, make: () => { A.lastAdd = performance.now(); return newLayer(A.prof, new Set(CORE_IDS), rnd() < 0.5); } },
+    // ----- the wishlist modules: add them when the music needs them, then play them -----
+    'add envelope': { fx: { energy: 0.5, novelty: 1.2, motion: 0.5 }, ok: () => canAdd() && !E.mods.contour && envTargets().length, make: () => { A.lastAdd = performance.now(); const [v, trig] = pick(envTargets()); return [{ do: 'say', text: `Adding a function generator so every note plucks the ${E.mods[v].name} filter.` }, ...L.contourEnv(v, trig)]; } },
+    'add lfo swarm': { fx: { novelty: 1.2, motion: 0.9 }, ok: () => canAdd() && !E.mods.swarm && freeCV().length, make: () => { A.lastAdd = performance.now(); const d = freeCV().sort(() => rnd() - 0.5).slice(0, 3); return [{ do: 'say', text: 'Adding eight related LFOs so several knobs drift at once.' }, ...L.swarmTo(d, pick(['1 BAR', '2 BAR', '4 BAR']))]; } },
+    'add grains': { fx: { novelty: 1.3, energy: 0.2, chaos: 0.3 }, ok: () => canAdd() && !E.mods.grains && grainSources().length, make: () => { A.lastAdd = performance.now(); const v = pick(grainSources()); return [{ do: 'say', text: `Sending ${E.mods[v].name} into a granular processor for texture.` }, ...L.grainsOn(v, { pitch: pick(['0', '+12', '-12', '+7']), size: 0.4 + rnd() * 0.4, fb: A.prof.tr.chaos * 0.4 })]; } },
+    'add clock brain': { fx: { energy: 0.5, motion: 1, novelty: 1.1 }, ok: () => canAdd() && !E.mods.work && drumsOn(), make: () => { A.lastAdd = performance.now(); return [{ do: 'say', text: 'Adding a clock brain for euclidean extra hits.' }, ...L.workoutDrums(pick(['RS', 'CB', 'CP', 'CH']), pick(['1/16', '1/8T', '1/16T']), pick([3, 5, 7, 9]), 0.8)]; } },
+    'add random melody': { fx: { novelty: 1.3, chaos: 0.5, energy: 0.3 }, ok: () => canAdd() && !E.mods.marbles && idleVoices().length, make: () => { A.lastAdd = performance.now(); const v = pick(idleVoices()); return [{ do: 'say', text: `Letting a random generator play ${E.mods[v].name}, in key.` }, ...L.marblesLayer(A.prof, v)]; } },
+    'add sample and hold': { fx: { novelty: 1, chaos: 0.8, motion: 0.6 }, ok: () => canAdd() && !E.mods.tools && freeCV().length, make: () => { A.lastAdd = performance.now(); const trig = E.mods.marbles ? 'marbles.T2' : E.mods.work ? 'work.O3' : 'clock.BEAT'; return [{ do: 'say', text: 'Adding sample and hold for stepped random movement.' }, ...L.shTo(pick(freeCV()), trig)]; } },
+    'grain freeze': { fx: { novelty: 1, motion: -0.3 }, ok: () => routed('grains'), make: () => [K('grains', 'freeze', E.mods.grains.frozen ? 'OFF' : 'ON', E.mods.grains.frozen ? 'let the grains follow the music again' : 'freeze the buffer and hold the texture')] },
+    'grain shimmer': { fx: { bright: 0.6, novelty: 0.8 }, ok: () => routed('grains'), make: () => [K('grains', 'pitch', pick(['+12', '+7', '+24', '0', '-12']), 'change the grain pitch'), nudge('grains', 'spray', rnd() * 0.3 - 0.1)] },
+    'grain smear': { fx: { energy: -0.3, novelty: 0.6, motion: 0.3 }, ok: () => routed('grains'), make: () => [nudge('grains', 'size', 0.15, 'longer grains, smoother wash', 1500), nudge('grains', 'dens', 0.12)] },
+    'grain scatter': { fx: { energy: 0.3, chaos: 0.6, motion: 0.6 }, ok: () => routed('grains'), make: () => [nudge('grains', 'size', -0.18, 'short grains, more stutter', 900), nudge('grains', 'spray', 0.2)] },
+    'swarm faster': { fx: { motion: 0.8, energy: 0.2 }, ok: () => E.mods.swarm && E.cablesFrom('swarm').length && E.mods.swarm.v('sync') < 7, make: () => [nudge('swarm', 'sync', 1 / 7, 'faster movement')] },
+    'swarm slower': { fx: { motion: -0.6, energy: -0.2 }, ok: () => E.mods.swarm && E.cablesFrom('swarm').length && E.mods.swarm.v('sync') > 1, make: () => [nudge('swarm', 'sync', -1 / 7, 'slower movement')] },
+    'swarm deeper': { fx: { motion: 0.6, chaos: 0.3, bright: 0.2 }, ok: () => E.mods.swarm && E.cablesFrom('swarm').length, make: () => [nudge('swarm', 'depth', 0.12, 'more modulation depth')] },
+    'marbles lock': { fx: { chaos: -0.8, novelty: -0.2 }, ok: () => E.mods.marbles && E.cablesFrom('marbles').length, make: () => [nudge('marbles', 'deja', 0.2, 'repeat the phrase, it found something good')] },
+    'marbles loosen': { fx: { chaos: 0.8, novelty: 0.9 }, ok: () => E.mods.marbles && E.cablesFrom('marbles').length, make: () => [nudge('marbles', 'deja', -0.25, 'let the random line wander'), nudge('marbles', 'spread', rnd() * 0.2 - 0.1)] },
+    'euclid shift': { fx: { novelty: 0.8, motion: 0.4 }, ok: () => E.mods.work && E.cablesFrom('work').length, make: () => [K('work', 'shift', String(Math.floor(rnd() * 16)), 'rotate the euclidean hits'), K('work', 'e8', String(pick([3, 5, 7, 9, 11])))] },
+    'envelope snap': { fx: { energy: 0.4, bright: 0.3 }, ok: () => E.mods.contour && E.cablesFrom('contour').length && E.mods.contour.params.f1.n > 0.35, make: () => [nudge('contour', 'f1', -0.08, 'shorter, punchier envelope')] },
+    'envelope bloom': { fx: { energy: -0.2, bright: 0.2 }, ok: () => E.mods.contour && E.cablesFrom('contour').length && E.mods.contour.params.f1.n < 0.75, make: () => [nudge('contour', 'f1', 0.08, 'longer envelope tail')] },
     'delay throw': { fx: { novelty: 0.7, motion: 0.4 }, ok: () => true, make: () => [K('mixer', 'dfb', 0.7 + rnd() * 0.15, 'dub delay throw', 700), { do: 'wait', sec: 2 }, K('mixer', 'dfb', 0.35, null, 1200)] },
     'reverb wash': { fx: { energy: -0.3, bright: -0.2, novelty: 0.4 }, ok: () => true, make: () => [nudge('mixer', 'verb', 0.2, 'open up the space', 2000)] },
     'dry up': { fx: { energy: 0.2, bright: 0.1 }, ok: () => E.mods.mixer.v('verb') > 0.25, make: () => [nudge('mixer', 'verb', -0.2, 'tighten the space')] },
@@ -560,8 +615,8 @@ const AI = (() => {
   const SECTION_MOVES = {
     intro: () => [...secPat('C', 'intro pattern'), { do: 'mute', inst: 'BD', on: true, why: 'start without the kick' }, { do: 'mute', inst: 'SD', on: true }, { do: 'mute', inst: 'CP', on: true }, ...voiceCut().map(([m, k]) => K(m, k, 0.15, 'start dark', 2500))],
     build: () => [...secPat('A', 'build pattern'), { do: 'mute', inst: 'CH', on: false }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...voiceCut().slice(0, 1).map(([m, k]) => nudge(m, k, 0.2, 'rising filter for the build', 6000))],
-    drop: () => [...secPat('B', 'drop pattern'), { do: 'mute', inst: 'BD', on: false, why: 'here comes the drop' }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...voiceCut().map(([m, k]) => nudge(m, k, 0.25, 'open up', 900)), K('mixer', 'master', 0.85)],
-    break: () => [...secPat('C', 'break pattern'), { do: 'mute', inst: 'BD', on: true, why: 'breakdown' }, nudge('mixer', 'verb', 0.25, 'wash it out', 2500)],
+    drop: () => [...(routed('grains') ? [K('grains', 'freeze', 'OFF', 'unfreeze for the drop')] : []), ...(E.mods.swarm ? [K('swarm', 'depth', 0.55, 'more movement for the drop')] : []), ...secPat('B', 'drop pattern'), { do: 'mute', inst: 'BD', on: false, why: 'here comes the drop' }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...voiceCut().map(([m, k]) => nudge(m, k, 0.25, 'open up', 900)), K('mixer', 'master', 0.85)],
+    break: () => [...secPat('C', 'break pattern'), { do: 'mute', inst: 'BD', on: true, why: 'breakdown' }, nudge('mixer', 'verb', 0.25, 'wash it out', 2500), ...(routed('grains') ? [K('grains', 'freeze', 'ON', 'freeze the texture for the break')] : [])],
     peak: () => [...secPat('B', 'peak pattern'), { do: 'mute', inst: 'BD', on: false }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...(routed('acid') ? [nudge('acid', 'drive', 0.2, 'peak-time grit')] : []), ...(routed('titan') ? [nudge('titan', 'drive', 0.2)] : []), K('mixer', 'verb', 0.3)],
     outro: () => [...secPat('C', 'outro pattern'), { do: 'mute', inst: 'SD', on: true }, { do: 'mute', inst: 'CP', on: true }, ...voiceCut().map(([m, k]) => nudge(m, k, -0.25, 'wind it down', 5000))]
   };
@@ -609,7 +664,7 @@ ACTIONS (JSON objects):
 {"do":"remove","mod":"id"}
 {"do":"say","text":"short first-person narration of your intent"}
 
-ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}, ids like ${t.prefix}3)`).join('; ')}. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
+ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}${t.desc ? ': ' + t.desc : ''}, ids like ${t.prefix}3)`).join('; ')}. CV outputs swing about -1..1 (Contour 0..1); a voice CUT input moves the cutoff 2 octaves per unit. Modulation modules (Contour, Swarm, Toolbox) make complex patches: patch their outputs into CUT, FOLD, CV, POS and similar inputs. Workout and Marbles outputs are events (ev) for TRIG/CLK/NOTE inputs. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
 
 Reply with JSON only:
 {"summary":"one sentence","targets":{"energy":0-1,"brightness":0-1},
@@ -694,6 +749,12 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
       if (/bell|string|marimba|physical/i.test(t)) await runAll(L.bodies(p, /string/i.test(t) ? 'STRING' : /marimba/i.test(t) ? 'MARIMBA' : 'BELL'));
       if (/wobble|dubstep|bass/i.test(t) && !routed('titan')) await runAll(L.titan(p, true));
       if (/acid|303/i.test(t) && !routed('acid')) await runAll(L.acid(p));
+      if (/grain|granular|texture|cloud|freeze/i.test(t) && !E.mods.grains) { const v = grainSources(); if (v.length) await runAll(L.grainsOn(pick(v))); }
+      if (/lfo|modulat|movement|swarm|evolv/i.test(t) && !E.mods.swarm && freeCV().length) await runAll(L.swarmTo(freeCV().slice(0, 3)));
+      if (/random|marbles|generative/i.test(t) && !E.mods.marbles && idleVoices().length) await runAll(L.marblesLayer(p, pick(idleVoices())));
+      if (/envelope|maths|contour|pluck|function gen/i.test(t) && !E.mods.contour && envTargets().length) await runAll(L.contourEnv(...pick(envTargets())));
+      if (/euclid|polyrhythm|workout|clock div/i.test(t) && !E.mods.work && drumsOn()) await runAll(L.workoutDrums('RS', '1/16', 5, 0.85));
+      if (/sample.?(and|&|n).?hold|s&h|toolbox|utilit/i.test(t) && !E.mods.tools && freeCV().length) await runAll(L.shTo(pick(freeCV()), 'clock.BEAT'));
       if (!E.running) await run({ do: 'transport', run: true });
     }
     if (A.abort) return finish();
