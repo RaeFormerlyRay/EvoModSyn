@@ -6,8 +6,8 @@ const TL = (() => {
   const h = UI.h;
   const T = {
     events: [], clips: [], bufs: new Map(), snapshot: null,
-    pos: 0, playing: false, recording: false, loop: false, loopA: 0, loopB: 16, snap: true, follow: true,
-    pps: 36, scrollX: 0, sel: new Set(), applying: false, tracks: 4
+    pos: 0, playing: false, recording: false, loop: false, loopA: 0, loopB: 0, snap: true, follow: true,
+    pps: 36, scrollX: 0, sel: new Set(), fold: new Set(), seen: new Set(), applying: false, tracks: 4
   };
   const C = { marker: '#ffb03b', ai: '#52f2ff', you: '#ffb03b', grid: '#ffffff10', bar: '#ffffff26', ink: '#e6e3da', dim: '#9a9a94', faint: '#62656b' };
   const LANE_H = { marker: 22, global: 24, events: 26, param: 36, audio: 58 };
@@ -75,13 +75,13 @@ const TL = (() => {
   E.on('transport', r => { if (T.recording && !T.applying) { T.events.push({ id: uid(), t: T.pos, kind: 'transport', run: r, src: srcNow() }); dirty(); } });
   // patterns, drum grids and song chains: compare snapshots a few times a second
   const dataOf = m => m.kind === 'StepSeq' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn } : m.kind === 'Drums' ? { pat: m.pat, mute: m.mute } : null;
-  const lastData = {};
+  const lastData = {}, lastDataEv = {};
   setInterval(() => {
     if (!T.recording) return;
     for (const id of E.order) {
       const d = dataOf(E.mods[id]); if (!d) continue;
       const s = JSON.stringify(d);
-      if (lastData[id] !== s) { const first = lastData[id] == null; lastData[id] = s; if (!first && !T.applying) { T.events.push({ id: uid(), t: T.pos, kind: 'data', mod: id, data: JSON.parse(s), src: srcNow() }); dirty(); } }
+      if (lastData[id] !== s) { const first = lastData[id] == null; lastData[id] = s; if (!first && !T.applying) { const prev = lastDataEv[id]; if (prev && T.events.includes(prev) && T.pos - prev.t < 1.2) prev.data = JSON.parse(s); else { lastDataEv[id] = { id: uid(), t: T.pos, kind: 'data', mod: id, data: JSON.parse(s), src: srcNow() }; T.events.push(lastDataEv[id]); } dirty(); } }
     }
   }, 180);
   const origLog = AI.log;
@@ -243,9 +243,11 @@ const TL = (() => {
     ids.sort((a, b) => (E.order.indexOf(a) + 1 || 999) - (E.order.indexOf(b) + 1 || 999));
     for (const id of ids) {
       const color = E.mods[id]?.stripe || '#888';
-      if (T.events.some(e => e.mod === id && e.kind !== 'param')) out.push({ type: 'events', mod: id, label: `${modName(id)} · patch & notes`, color });
       const keys = []; for (const e of T.events) if (e.kind === 'param' && e.mod === id && !keys.includes(e.key)) keys.push(e.key);
-      for (const k of keys) out.push({ type: 'param', mod: id, key: k, label: `${modName(id)} · ${E.mods[id]?.params[k]?.label || k}`, color });
+      if (!T.seen.has(id) && keys.length > 3) { T.seen.add(id); T.fold.add(id); } // busy modules start folded
+      const folded = T.fold.has(id);
+      out.push({ type: 'events', mod: id, label: `${folded ? '▸' : '▾'} ${modName(id)}${folded && keys.length ? ` (${keys.length} lanes)` : ''}`, color, head: true });
+      if (!folded) for (const k of keys) out.push({ type: 'param', mod: id, key: k, label: `${modName(id)} · ${E.mods[id]?.params[k]?.label || k}`, color });
     }
     for (let i = 0; i < T.tracks; i++) out.push({ type: 'audio', track: i, label: `Audio ${i + 1}`, color: '#e8453c' });
     let y = 0; for (const l of out) { l.y = y; l.h = LANE_H[l.type]; y += l.h; }
@@ -293,9 +295,11 @@ const TL = (() => {
     for (const l of L) {
       const d = h('div', 'tl-head ' + l.type); d.style.height = l.h + 'px'; d.style.setProperty('--lc', l.color);
       d.innerHTML = `<span class="nm"></span>`; d.querySelector('.nm').textContent = l.label;
+      if (l.head) { d.classList.add('mhead'); d.title = 'Click to show or hide this module\'s automation lanes'; d.onclick = e => { if (e.target.closest('.x')) return; T.fold.has(l.mod) ? T.fold.delete(l.mod) : T.fold.add(l.mod); dirty(); }; }
       if (l.type !== 'audio') {
         const x = h('button', 'x', '✕'); x.type = 'button'; x.title = 'Delete everything on this lane';
-        x.onclick = () => { T.events = T.events.filter(e => laneOf(e, L) !== l); T.sel.clear(); dirty(); };
+        x.onclick = () => { T.events = T.events.filter(e => l.head ? e.mod !== l.mod : laneOf(e, L) !== l); T.sel.clear(); dirty(); };
+        if (l.head) x.title = 'Delete everything recorded for this module';
         d.append(x);
       } else { d.title = 'Drop audio files here'; if (T.selTrack === l.track) d.classList.add('sel'); d.onclick = () => { T.selTrack = l.track; renderHeads(); }; }
       heads.append(d);
@@ -626,6 +630,6 @@ const TL = (() => {
   new ResizeObserver(() => dirty()).observe(view);
   renderHeads(); renderBar();
 
-  Object.assign(T, { play, stop, record, seek, snapshot, restore, addFiles, ensureTape, draw, lanes: () => L });
+  Object.assign(T, { play, stop, record, seek, takeSnapshot: snapshot, restore, addFiles, ensureTape, draw, lanes: () => L });
   return T;
 })();

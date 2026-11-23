@@ -39,6 +39,7 @@ PANELS = {
     'grains':  (380, 'enamel',    (214, 206, 182), 0.55, 0.30, True),   # bone white
     'marbles': (360, 'enamel',    (30, 70, 78),    0.60, 0.35, False),  # teal
     'toolbox': (470, 'brushed',   (150, 152, 150), 0.45, 0.30, True),   # bare steel
+    'tape':    (230, 'enamel',    (92, 30, 26),    0.65, 0.50, False),  # oxblood tape deck
 }
 
 
