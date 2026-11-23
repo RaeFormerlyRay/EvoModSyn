@@ -3,11 +3,12 @@
 (() => {
   const E = Engine, $ = s => document.querySelector(s);
   // Rack order (flex-wraps into rows)
+  const mk = Mods.make;
   [
-    Mods.Clock('clock'), Mods.StepSeq('seq1', 'Sequencer A', '#f2b632'), Mods.StepSeq('seq2', 'Sequencer B', '#3e8ef0'), Mods.Entropy('ent'),
-    Mods.Drums('drums'), Mods.Analog('acid', 'Voice 303', '#f2b632', 'ACID'), Mods.Analog('lead', 'Voice Poly', '#3e8ef0', 'JOVE'), Mods.Geiger('geiger'),
-    Mods.Titan('titan'), Mods.Chip('chip'), Mods.Bodies('bodies'), Mods.Slope('slope'), Mods.Fold('fold'), Mods.VCFQ('vcfq'),
-    Mods.Mixer('mixer'), Mods.Monitor('monitor')
+    mk('Clock', 'clock'), mk('StepSeq', 'seq1', { name: 'Sequencer A', stripe: '#f2b632' }), mk('StepSeq', 'seq2', { name: 'Sequencer B', stripe: '#3e8ef0' }), mk('Entropy', 'ent'),
+    mk('Drums', 'drums'), mk('Analog', 'acid', { name: 'Voice 303', stripe: '#f2b632', model: 'ACID' }), mk('Analog', 'lead', { name: 'Voice Poly', stripe: '#3e8ef0', model: 'JOVE' }), mk('Geiger', 'geiger'),
+    mk('Titan', 'titan'), mk('Chip', 'chip'), mk('Bodies', 'bodies'), mk('Slope', 'slope'), mk('Fold', 'fold'), mk('VCFQ', 'vcfq'),
+    mk('Mixer', 'mixer'), mk('Monitor', 'monitor')
   ].forEach(E.add);
   UI.build();
 
@@ -17,6 +18,8 @@
     const line = [0, 0, 7, 0, 3, 0, 0, 10, 0, 5, 0, 3, 7, 0, 12, 0];
     line.forEach((n, i) => s1.steps[i] = { n: n > 6 ? n - 7 + 7 : n, g: [1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1][i], a: [0, 3, 8, 12].includes(i) ? 1 : 0, s: [2, 7, 13].includes(i) ? 1 : 0, p: 1, r: 1 });
     s1.params.scale.setNorm(s1.params.scale.normOf('PHRYG')); s1.params.oct.setNorm(s1.params.oct.normOf('2')); s1.params.root.setNorm(s1.params.root.normOf('A'));
+    s1.pats[1] = s1.pats[0].map((st, i) => ({ ...st, n: i % 4 === 2 ? st.n + 2 : st.n, r: i === 14 || i === 15 ? 2 : 1 }));
+    s1.cur = 0; s1.next = null; s1.setSong([{ pat: 0, rep: 4 }, { pat: 1, rep: 2 }], false);
     s1.ui.renderSteps();
     const d = E.mods.drums, pats = { BD: 'X...x...X...x...', CP: '....x.......x...', CH: 'x.x.x.x.x.x.x.x.', OH: '..x...x...x...x.' };
     d.INST.forEach((ins, r) => d.pat[r] = (pats[ins] || '................').split('').map(c => c === 'X' ? 2 : c === 'x' ? 1 : 0));
@@ -40,6 +43,9 @@
   E.on('bpm', b => { $('#bpmread').textContent = b.toFixed(1) + ' BPM'; });
   $('#bpmread').textContent = E.bpm.toFixed(1) + ' BPM';
   $('#resetpatch').onclick = starter;
+  const addSel = $('#addmod');
+  Object.entries(Mods.TYPES).forEach(([k, t]) => { const o = document.createElement('option'); o.value = k; o.textContent = t.label; addSel.append(o); });
+  addSel.onchange = () => { const t = addSel.value; addSel.value = ''; if (!t) return; const id = UI.createModule(t); const el = UI.modEls[id]; el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); AI.log('sys', `you added ${E.mods[id].name}`); };
   $('#clearpatch').onclick = () => E.clearCables();
 
   // ----- console -----

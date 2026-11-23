@@ -7,6 +7,12 @@ const Engine = (() => {
     ctx, bpm: 126, swing: 0, running: false, mods: {}, order: [], cables: [],
     noise: null, uiq: [], listeners: { change: [] }, step: 0, nextTime: 0
   };
+  // Record every source node a module starts while it is being built, so the module can be removed cleanly later
+  E._collect = null;
+  ['createOscillator', 'createConstantSource', 'createBufferSource'].forEach(name => {
+    const orig = ctx[name].bind(ctx);
+    ctx[name] = (...a) => { const n = orig(...a); if (E._collect) E._collect.push(n); return n; };
+  });
   E.noise = DSP.noiseBuffer(ctx, 2);
   E.lfsr = DSP.lfsrBuffer(ctx, false);
   E.lfsrShort = DSP.lfsrBuffer(ctx, true);
@@ -87,6 +93,20 @@ const Engine = (() => {
   }
   E.Module = Module;
 
+  // Build a module and remember the sources it started
+  E.build = (fn) => { E._collect = []; let m; try { m = fn(); } finally { m && (m._srcs = E._collect); E._collect = null; } return m; };
+  E.newId = (prefix, reserved) => { for (let i = 2; ; i++) { const id = prefix + i; if (!E.mods[id] && !(reserved && reserved.has(id))) return id; } };
+  E.remove = (id) => {
+    const m = E.mods[id]; if (!m) return false;
+    E.cables.filter(c => c.from.mod === id || c.to.mod === id).forEach(c => E.disconnect(c));
+    for (const s of m._srcs || []) { try { s.stop(); } catch (e) { /* not started */ } try { s.disconnect(); } catch (e) { /* none */ } }
+    if (m.lfo) { try { m.lfo.stop(); } catch (e) { /* stopped */ } }
+    for (const o of Object.values(m.outs)) if (o.node) { try { o.node.disconnect(); } catch (e) { /* none */ } }
+    m.disposed = true; m.ui = null;
+    delete E.mods[id]; E.order = E.order.filter(x => x !== id);
+    E.fire('modules', { type: 'remove', id });
+    return true;
+  };
   E.add = (mod) => {
     E.mods[mod.id] = mod; E.order.push(mod.id);
     for (const k of mod.paramOrder) { const p = mod.params[k]; if (p.apply) { try { p.apply(p.value, p); } catch (e) { console.error(mod.id, k, e); } } }
@@ -138,7 +158,7 @@ const Engine = (() => {
         E.nextTime += dur;
       }
     }
-    for (const id of E.order) { const m = E.mods[id]; if (m.tick !== Module.prototype.tick) m.tick(now, horizon); }
+    for (const id of E.order) { const m = E.mods[id]; if (!m) continue; if (m.tick !== Module.prototype.tick) m.tick(now, horizon); }
   }
   // setInterval keeps running when the tab is hidden (throttled), rAF does not
   setInterval(pass, 25);

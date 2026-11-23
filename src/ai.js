@@ -123,16 +123,63 @@ const AI = (() => {
           if (c) { await UI.aiUnpatch(c); A.log('act', `<b>unplug</b> ${E.mods[c.from.mod].name} ${c.from.port} ✕ ${E.mods[to.mod].name} ${to.port}${a.why ? ' · ' + esc(a.why) : ''}`); }
           break;
         }
-        case 'steps': {
-          const m = E.mods[a.mod]; if (!m?.steps) break;
-          const notes = (a.notes || []).slice(0, 16); while (notes.length < 16) notes.push(null);
+        case 'steps': case 'pattern': {
+          const m = E.mods[a.mod]; if (!m?.pats) { A.log('err', `skipped pattern for ${esc(a.mod)} (not a step sequencer)`); break; }
+          const pi = a.pat == null ? m.cur : patIx(a.pat); if (pi < 0) break;
+          const fit = (arr, d) => { const o = (arr || []).slice(0, 16); while (o.length < 16) o.push(d); return o; };
+          const notes = fit(a.notes, null), probs = fit(a.probs, 1), rats = fit(a.ratchets, 1);
           const acc = new Set(a.accents || []), sl = new Set(a.slides || []);
-          const els = m.ui.cells;
-          await UI.aiCells(els, a.mod, `program ${m.name} steps`, i => {
-            const v = notes[i]; m.steps[i] = { n: v == null ? m.steps[i].n : clamp(Math.round(v), -7, 14), g: v == null ? 0 : 1, a: acc.has(i) ? 1 : 0, s: sl.has(i) ? 1 : 0, p: 1, r: 1 };
-            m.ui.renderSteps();
+          const L = 'ABCDEFGH'[pi];
+          if (pi !== m.cur) { await UI.aiPoint(m.ui.pbs[pi], a.mod, `edit ${m.name} pattern ${L}`); m.view = pi; m.ui.renderAll(); }
+          await UI.aiCells(m.ui.cells, a.mod, `program ${m.name} pattern ${L}`, i => {
+            const v = notes[i], cur = m.pats[pi][i];
+            m.pats[pi][i] = { n: v == null ? cur.n : clamp(Math.round(v), -7, 14), g: v == null ? 0 : 1, a: acc.has(i) ? 1 : 0, s: sl.has(i) ? 1 : 0, p: clamp(+probs[i] || (probs[i] === 0 ? 0 : 1)), r: clamp(Math.round(+rats[i] || 1), 1, 4) };
+            m.ui.renderAll();
           });
-          A.log('act', `<b>program</b> ${m.name}: ${notes.map(v => v == null ? '·' : v).join(' ')}${a.why ? ' · ' + esc(a.why) : ''}`);
+          m.view = null; m.ui.renderAll();
+          A.log('act', `<b>program</b> ${m.name} ${L}: ${notes.map((v, i) => v == null ? '·' : v + (rats[i] > 1 ? '×' + rats[i] : '')).join(' ')}${a.why ? ' · ' + esc(a.why) : ''}`);
+          break;
+        }
+        case 'copy': {
+          const m = E.mods[a.mod]; if (!m?.pats) break;
+          const f = patIx(a.from), t = patIx(a.to); if (f < 0 || t < 0 || f === t) break;
+          await UI.aiPoint(m.ui.pbs[f], a.mod, `copy pattern ${'ABCDEFGH'[f]}`); await UI.aiPoint(m.ui.pbs[t], a.mod, `paste into ${'ABCDEFGH'[t]}`);
+          m.pats[t] = m.pats[f].map(s => ({ ...s })); m.ui.renderAll();
+          A.log('act', `<b>copy</b> ${m.name} pattern ${'ABCDEFGH'[f]} → ${'ABCDEFGH'[t]}`);
+          break;
+        }
+        case 'select': {
+          const m = E.mods[a.mod]; if (!m?.pats) break;
+          const pi = patIx(a.pat); if (pi < 0 || (pi === m.cur && m.next == null)) break;
+          if (m.songOn) { await UI.aiPoint(m.ui.songBtn, a.mod, 'leave song mode'); m.setSong(null, false); }
+          await UI.aiPoint(m.ui.pbs[pi], a.mod, `${m.name}: switch to ${'ABCDEFGH'[pi]}`);
+          m.queue(pi);
+          A.log('act', `<b>switch</b> ${m.name} to pattern ${'ABCDEFGH'[pi]}${a.why ? ' · ' + esc(a.why) : ''}`);
+          break;
+        }
+        case 'song': {
+          const m = E.mods[a.mod]; if (!m?.pats) break;
+          const chain = (a.chain || []).map(c => Array.isArray(c) ? { pat: patIx(c[0]), rep: +c[1] || 1 } : { pat: patIx(c.pat), rep: +c.rep || 1 }).filter(c => c.pat >= 0);
+          await UI.aiPoint(m.ui.songBtn, a.mod, `${m.name}: write the song`);
+          m.setSong(chain.length ? chain : null, a.on == null ? true : a.on);
+          A.log('act', `<b>song</b> ${m.name}: ${m.song.map(e => 'ABCDEFGH'[e.pat] + '×' + e.rep).join(' → ')} ${m.songOn ? '(song mode on)' : '(off)'}${a.why ? ' · ' + esc(a.why) : ''}`);
+          break;
+        }
+        case 'add': {
+          if (a.id && E.mods[a.id]) break;
+          if (!Mods.TYPES[a.type]) { A.log('err', `skipped adding unknown module type "${esc(a.type)}"`); break; }
+          if (E.order.length >= 32) { A.log('err', 'the rack is full (32 modules), skipped adding'); break; }
+          const id = UI.createModule(a.type, { id: a.id, model: a.model, name: a.name, stripe: a.stripe });
+          const el = UI.modEls[id]; U_scroll(el);
+          await UI.sleep(350 * UI.speed);
+          await UI.aiPoint(el.querySelector('.nm'), id, `add ${E.mods[id].name}`);
+          A.log('act', `<b>add module</b> ${esc(E.mods[id].name)} (${id})${a.why ? ' · ' + esc(a.why) : ''}`);
+          break;
+        }
+        case 'remove': {
+          const m = E.mods[a.mod]; if (!m || ['clock', 'mixer', 'monitor'].includes(a.mod)) break;
+          await UI.aiPoint(UI.modEls[a.mod].querySelector('.modx') || UI.modEls[a.mod], a.mod, `remove ${m.name}`);
+          UI.removeModule(a.mod); A.log('act', `<b>remove module</b> ${esc(m.name)}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
         case 'drums': {
@@ -158,11 +205,18 @@ const AI = (() => {
           await UI.aiPoint(btn, 'clock', a.run ? 'start the clock' : 'stop the clock');
           a.run ? E.start() : E.stop(); A.log('act', `<b>${a.run ? 'start' : 'stop'}</b> clock`); break;
         }
-        case 'route': { // send a module's OUT to its home mixer channel at a level
-          const ch = a.ch || MIXCH[a.mod] || freeChannel(); const port = a.port || 'OUT';
-          await run({ do: 'patch', from: `${a.mod}.${port}`, to: `mixer.IN${ch}`, why: a.why || 'into the mix' });
-          if (a.level != null) await run({ do: 'knob', mod: 'mixer', key: 'l' + ch, to: a.level });
-          if (a.send != null) await run({ do: 'knob', mod: 'mixer', key: 's' + ch, to: a.send });
+        case 'route': { // send a module's output into a free mixer channel (adds a mixer if every channel is taken)
+          const port = a.port || 'OUT';
+          const ex = E.cables.find(c => c.from.mod === a.mod && c.from.port === port && E.mods[c.to.mod]?.kind === 'Mixer');
+          let mix, ch;
+          if (ex) { mix = ex.to.mod; ch = +ex.to.port.slice(2); }
+          else if (a.ch) { mix = 'mixer'; ch = a.ch; }
+          else if (MIXCH[a.mod] && !E.findCable('mixer', 'IN' + MIXCH[a.mod])) { mix = 'mixer'; ch = MIXCH[a.mod]; }
+          else { const f = freeSlot(); if (f) [mix, ch] = f; else { mix = await addMixer(); ch = 1; } }
+          if (!mix) break;
+          if (!ex) await run({ do: 'patch', from: `${a.mod}.${port}`, to: `${mix}.IN${ch}`, why: a.why || 'into the mix' });
+          if (a.level != null) await run({ do: 'knob', mod: mix, key: 'l' + ch, to: a.level });
+          if (a.send != null) await run({ do: 'knob', mod: mix, key: 's' + ch, to: a.send });
           break;
         }
         case 'wait': await UI.sleep((a.sec || 1) * 1000); break;
@@ -172,6 +226,21 @@ const AI = (() => {
   }
   A.run = run;
   function freeChannel() { for (let i = 1; i <= 8; i++) if (!E.findCable('mixer', 'IN' + i)) return i; return 8; }
+  const patIx = v => typeof v === 'number' ? (v >= 0 && v < 8 ? v | 0 : -1) : 'ABCDEFGH'.indexOf(String(v || '').toUpperCase().trim());
+  const kindIs = (id, ...k) => k.includes(E.mods[id]?.kind);
+  const U_scroll = el => { if (UI.follow && el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' }); };
+  function freeSlot() {
+    for (const id of E.order) if (kindIs(id, 'Mixer')) for (let i = 1; i <= 8; i++) if (!E.findCable(id, 'IN' + i)) return [id, i];
+    return null;
+  }
+  async function addMixer() {
+    const port = ['IN', 'IN2', 'IN3', 'IN4'].find(p => !E.findCable('monitor', p));
+    if (!port) { A.log('err', 'every mixer channel and monitor input is taken'); return null; }
+    const id = E.newId('mixer');
+    await run({ do: 'add', type: 'Mixer', id, why: 'every channel is taken, so add another mixer' });
+    await run({ do: 'patch', from: `${id}.OUT`, to: `monitor.${port}`, why: 'second mixer to the speakers' });
+    return id;
+  }
   async function runAll(list) { for (const a of list) { if (A.abort) return; await run(a); } }
 
   // ======================= READING THE BRIEF =======================
@@ -201,8 +270,10 @@ const AI = (() => {
     if (dm) { const v = parseFloat(dm[1]), u = dm[2].toLowerCase(); dur = u[0] === 'h' ? v * 3600 : u[0] === 'm' ? v * 60 : v; }
     if (mode === 'perform' && !dur) dur = 5 * 60;
     if (mode === 'design' && dur) mode = 'perform';
+    const complex = (/complex|layer|rich|dense|epic|full|big|song|arrang|orchestr|massive|huge/i.test(task) ? 2 : 0) + (mode === 'perform' ? 1 : 0) + (tr.chaos > 0.6 ? 1 : 0);
+    const songWanted = /song|arrang|structure|verse|chorus/i.test(task);
     const focus = { bass: /bass/i.test(task), lead: /lead|melod/i.test(task), drums: /drum|beat|groove|rhythm/i.test(task), pad: /pad|drone/i.test(task) };
-    return { genre, mode, dur: Math.min(dur, 3 * 3600), tr, focus, task, persona };
+    return { genre, mode, dur: Math.min(dur, 3 * 3600), tr, focus, task, persona, complex: Math.min(3, complex), songWanted };
   }
 
   // ======================= PATTERN WRITERS =======================
@@ -327,8 +398,54 @@ const AI = (() => {
   };
 
   // ======================= SOUND-SHAPING MOVES (the learning part) =======================
-  const routed = id => E.cables.some(c => c.from.mod === id && c.to.mod === 'mixer');
-  const voiceCut = () => [['acid', 'cutoff'], ['titan', 'cut'], ['lead', 'cutoff'], ['vcfq', 'freq']].filter(([m]) => routed(m));
+  const routed = id => E.cables.some(c => c.from.mod === id && E.mods[c.to.mod]?.kind === 'Mixer');
+  const CUTKEY = { Analog: 'cutoff', Titan: 'cut', VCFQ: 'freq' };
+  const voiceCut = () => E.order.filter(id => CUTKEY[E.mods[id].kind] && routed(id)).map(id => [id, CUTKEY[E.mods[id].kind]]);
+  const activeSeqs = () => E.order.filter(id => kindIs(id, 'StepSeq') && E.cablesFrom(id, 'NOTE').length);
+  const VOICE_KINDS = ['Analog', 'Titan', 'Chip', 'Bodies', 'VCFQ'];
+  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq'];
+
+  // ----- pattern variations and songs -----
+  function variation(notes, kind) {
+    const n = notes.slice(), rats = Array(16).fill(1), probs = Array(16).fill(1);
+    if (kind === 'B') { for (let k = 0; k < 3; k++) { const j = Math.floor(rnd() * 16); n[j] = rnd() < 0.2 ? null : pick([0, 2, 3, 4, 5, 7, -2]); } if (rnd() < 0.5) rats[15] = 2; }
+    if (kind === 'C') for (let i = 0; i < 16; i++) if (i % 4 !== 0) n[i] = null;
+    if (kind === 'D') { for (let i = 12; i < 16; i++) { if (n[i] == null) n[i] = pick([0, 3, 7]); rats[i] = pick([2, 3, 4]); } for (let i = 0; i < 12; i++) if (n[i] != null && rnd() < 0.3) probs[i] = 0.6; }
+    return { notes: n, ratchets: rats, probs };
+  }
+  // Write patterns B (variation), C (sparse) and D (fill) from A, then chain them into a song
+  function songify(seq, base, songOn, why) {
+    const acts = [];
+    for (const k of ['B', 'C', 'D']) acts.push({ do: 'pattern', mod: seq, pat: k, ...variation(base.notes, k), accents: base.accents || [], slides: k === 'C' ? [] : base.slides || [], why: { B: 'variation', C: 'stripped-back version for breaks', D: 'fill with ratchets' }[k] });
+    acts.push({ do: 'song', mod: seq, chain: [['A', 4], ['B', 4], ['A', 4], ['C', 2], ['D', 1], ['B', 4], ['C', 2]], on: songOn, why: songOn ? 'arrange the patterns into a song' : 'song written, I will switch patterns by hand during the set' });
+    return acts;
+  }
+  const LAYERS = {
+    acid: ['Analog:LADDER', 'Bodies', 'Chip', 'Analog:SCREAM'], dubstep: ['Chip', 'Analog:SCREAM', 'Bodies'], dnb: ['Analog:JOVE', 'Bodies', 'Chip'],
+    ambient: ['Bodies', 'Analog:JOVE', 'Bodies'], chip: ['Chip', 'Analog:ODYSSEY', 'Chip'], noise: ['Analog:SCREAM', 'Bodies', 'Titan'],
+    experimental: ['Bodies', 'Chip', 'Analog:PROPHECY'], default: ['Analog:PROPHECY', 'Bodies', 'Chip', 'Analog:SEM']
+  };
+  // A brand-new layer: add a sequencer and a voice module, patch them, write patterns and a song
+  function newLayer(p, reserved, songOn) {
+    const spec = pick(LAYERS[p.genre] || LAYERS.default), [type, model] = spec.split(':');
+    const seq = E.newId('seq', reserved); reserved.add(seq);
+    const vid = E.newId(type === 'Analog' ? 'voice' : Mods.TYPES[type].prefix, reserved); reserved.add(vid);
+    const ref = E.mods.seq1, low = type === 'Titan' || (type === 'Analog' && rnd() < 0.5);
+    const base = type === 'Bodies' || type === 'Chip' ? melody(p) : low ? bassLine(p, p.genre === 'dubstep') : melody(p);
+    const acts = [{ do: 'say', text: `Adding a new layer: a sequencer driving a ${type === 'Analog' ? model + ' analog voice' : Mods.TYPES[type].label}.` },
+      { do: 'add', type: 'StepSeq', id: seq, why: 'a new sequencer for the new layer' },
+      { do: 'add', type, id: vid, model, why: 'a new voice for more depth' },
+      P('clock.CLK', `${seq}.CLK`), P(`${seq}.NOTE`, `${vid}.NOTE`),
+      K(seq, 'scale', ref.params.scale.choice), K(seq, 'root', ref.params.root.choice), K(seq, 'oct', low ? 1 : 3), K(seq, 'gate', low ? 0.8 : 0.5),
+      { do: 'pattern', mod: seq, pat: 'A', ...base, why: 'main pattern for the new layer' },
+      ...songify(seq, base, songOn),
+      { do: 'route', mod: vid, level: low ? 0.55 : 0.45, send: low ? 0.1 : 0.4 }];
+    if (type === 'Analog') acts.push(K(vid, 'cutoff', 0.45), K(vid, 'res', 0.35 + p.tr.aggression * 0.3));
+    if (type === 'Bodies') acts.push(K(vid, 'model', pick(['BELL', 'MARIMBA', 'GLASS', 'STRING'])));
+    if (type === 'Chip') acts.push(K(vid, 'arp', pick(['MAJ', 'MIN', 'OCT', 'OFF'])));
+    return acts;
+  }
+  A.newLayer = newLayer;
   const nudge = (mod, key, d, why, ms) => { const p = E.mods[mod].params[key]; return K(mod, key, clamp(p.n + d), why, ms); };
   const drumsOn = () => routed('drums');
   const MOVES = {
@@ -342,15 +459,15 @@ const AI = (() => {
     'thin drums': { fx: { energy: -0.5, motion: -1 }, ok: drumsOn, make: () => { const ins = pick(['CH', 'RS', 'CP', 'OH', 'SD', 'LT', 'CB']); const r = E.mods.drums.INST.indexOf(ins); const cur = E.mods.drums.pat[r].map(v => v === 2 ? 'X' : v ? 'x' : '.').join(''); return [{ do: 'drums', inst: ins, pattern: cur.split('').map(c => c !== '.' && rnd() < 0.4 ? '.' : c).join(''), why: 'leave some space' }]; } },
     'drop kick': { fx: { energy: -0.9 }, ok: () => drumsOn() && !E.mods.drums.mute[0], make: () => [{ do: 'mute', inst: 'BD', on: true, why: 'pull the kick for tension' }] },
     'bring kick': { fx: { energy: 0.9 }, ok: () => drumsOn() && E.mods.drums.mute[0], make: () => [{ do: 'mute', inst: 'BD', on: false, why: 'kick back in' }] },
-    'mutate sequence': { fx: { novelty: 1, chaos: 0.3 }, ok: () => E.cablesFrom('seq1').length || E.cablesFrom('seq2').length, make: () => {
-      const id = E.cablesFrom('seq1').length && (rnd() < 0.6 || !E.cablesFrom('seq2').length) ? 'seq1' : 'seq2', m = E.mods[id];
+    'mutate sequence': { fx: { novelty: 1, chaos: 0.3 }, ok: () => activeSeqs().length, make: () => {
+      const id = pick(activeSeqs()), m = E.mods[id];
       const notes = m.steps.map(s => s.g ? s.n : null), k = 1 + Math.floor(rnd() * 3), acc = [], sl = [];
       for (let i = 0; i < k; i++) { const j = Math.floor(rnd() * 16); notes[j] = rnd() < 0.25 ? null : pick([0, 0, 2, 3, 4, 7, -3, 5]); }
       m.steps.forEach((s, i) => { if (s.a) acc.push(i); if (s.s) sl.push(i); });
       if (rnd() < 0.5) acc.push(Math.floor(rnd() * 16)); if (rnd() < 0.4) sl.push(Math.floor(rnd() * 16));
       return [{ do: 'steps', mod: id, notes, accents: acc, slides: sl, why: 'evolve the line' }];
     } },
-    'transpose': { fx: { novelty: 0.8 }, ok: () => E.cablesFrom('seq1').length || E.cablesFrom('seq2').length, make: () => { const ids = ['seq1', 'seq2'].filter(i => E.cablesFrom(i).length); const id = pick(ids); return [K(id, 'trans', pick([-2, 0, 0, 2, 3, -3, 4]).toString(), 'harmonic shift')]; } },
+    'transpose': { fx: { novelty: 0.8 }, ok: () => activeSeqs().length, make: () => { const id = pick(activeSeqs()); return [K(id, 'trans', pick([-2, 0, 0, 2, 3, -3, 4]).toString(), 'harmonic shift')]; } },
     'wobble rate': { fx: { energy: 0.4, novelty: 0.9, motion: 0.6 }, ok: () => routed('titan'), make: () => [K('titan', 'wrate', pick(['1/4', '1/8', '1/8T', '1/16', '1/16T', '1/4T']), 'switch the wobble rhythm', 300)] },
     'table morph': { fx: { novelty: 0.8, bright: 0.3 }, ok: () => routed('titan'), make: () => [K('titan', rnd() < 0.5 ? 'p1' : 'p2', rnd(), 'morph the wavetable', 1800), ...(rnd() < 0.3 ? [K('titan', 't1', pick(DSP.TABLES.map(t => t.name)))] : [])] },
     'more folds': { fx: { bright: 0.8, chaos: 0.7, energy: 0.3 }, ok: () => E.findCable('fold', 'IN') && routed('vcfq'), make: () => [nudge('fold', 'fold', 0.15, 'harsher harmonics')] },
@@ -370,7 +487,19 @@ const AI = (() => {
       if (m === 'vcfq') return L.geiger(A.prof);
       return L.lead(A.prof, pick(['JOVE', 'PROPHECY', 'ODYSSEY']));
     } },
-    'layer out': { fx: { energy: -0.6, novelty: 0.5 }, ok: () => ['chip', 'bodies', 'lead', 'vcfq'].filter(routed).length, make: () => { const m = pick(['chip', 'bodies', 'lead', 'vcfq'].filter(routed)); return [{ do: 'unpatch', to: `mixer.IN${E.cables.find(c => c.from.mod === m && c.to.mod === 'mixer').to.port.slice(2)}`, why: 'thin the arrangement' }]; } },
+    'layer out': { fx: { energy: -0.6, novelty: 0.5 }, ok: () => E.order.filter(id => kindIs(id, ...VOICE_KINDS) && routed(id)).length > 2, make: () => { const m = pick(E.order.filter(id => kindIs(id, ...VOICE_KINDS) && routed(id) && id !== 'acid' && id !== 'titan')); if (!m) return []; const c = E.cables.find(c => c.from.mod === m && E.mods[c.to.mod]?.kind === 'Mixer'); return [{ do: 'unpatch', to: `${c.to.mod}.${c.to.port}`, why: 'thin the arrangement' }]; } },
+    'switch pattern': { fx: { novelty: 0.9, energy: 0.1 }, ok: () => activeSeqs().some(id => !E.mods[id].songOn && [0, 1, 2, 3, 4, 5, 6, 7].filter(i => E.mods[id].hasNotes(i)).length > 1), make: () => {
+      const id = pick(activeSeqs().filter(id => !E.mods[id].songOn && [0, 1, 2, 3, 4, 5, 6, 7].filter(i => E.mods[id].hasNotes(i)).length > 1)), m = E.mods[id];
+      const opts = [0, 1, 2, 3, 4, 5, 6, 7].filter(i => i !== m.cur && m.hasNotes(i));
+      return [{ do: 'select', mod: id, pat: pick(opts), why: 'move the arrangement on' }];
+    } },
+    'write variation': { fx: { novelty: 1.1, chaos: 0.2 }, ok: () => activeSeqs().some(id => !E.mods[id].songOn), make: () => {
+      const id = pick(activeSeqs().filter(id => !E.mods[id].songOn)), m = E.mods[id];
+      const slot = [0, 1, 2, 3, 4, 5, 6, 7].find(i => i !== m.cur && !m.hasNotes(i)) ?? [0, 1, 2, 3, 4, 5, 6, 7].filter(i => i !== m.cur)[Math.floor(rnd() * 7)];
+      const v = variation(m.pats[m.cur].map(s => s.g ? s.n : null), pick(['B', 'B', 'D']));
+      return [{ do: 'pattern', mod: id, pat: slot, ...v, accents: m.pats[m.cur].map((s, i) => s.a ? i : -1).filter(i => i >= 0), why: 'write a new variation' }, { do: 'select', mod: id, pat: slot }];
+    } },
+    'add layer': { fx: { energy: 0.6, novelty: 1.3 }, ok: () => E.order.length <= 26 && performance.now() - (A.lastAdd || 0) > 45000, make: () => { A.lastAdd = performance.now(); return newLayer(A.prof, new Set(CORE_IDS), rnd() < 0.5); } },
     'delay throw': { fx: { novelty: 0.7, motion: 0.4 }, ok: () => true, make: () => [K('mixer', 'dfb', 0.7 + rnd() * 0.15, 'dub delay throw', 700), { do: 'wait', sec: 2 }, K('mixer', 'dfb', 0.35, null, 1200)] },
     'reverb wash': { fx: { energy: -0.3, bright: -0.2, novelty: 0.4 }, ok: () => true, make: () => [nudge('mixer', 'verb', 0.2, 'open up the space', 2000)] },
     'dry up': { fx: { energy: 0.2, bright: 0.1 }, ok: () => E.mods.mixer.v('verb') > 0.25, make: () => [nudge('mixer', 'verb', -0.2, 'tighten the space')] },
@@ -427,13 +556,14 @@ const AI = (() => {
     [...$('#timeline').querySelectorAll('.sec')].forEach((d, i) => d.classList.toggle('now', A.sections[i] === cur));
   }, 250);
 
+  const secPat = (L, why) => activeSeqs().filter(id => !E.mods[id].songOn && E.mods[id].hasNotes('ABCDEFGH'.indexOf(L))).map(id => ({ do: 'select', mod: id, pat: L, why }));
   const SECTION_MOVES = {
-    intro: () => [{ do: 'mute', inst: 'BD', on: true, why: 'start without the kick' }, { do: 'mute', inst: 'SD', on: true }, { do: 'mute', inst: 'CP', on: true }, ...voiceCut().map(([m, k]) => K(m, k, 0.15, 'start dark', 2500))],
-    build: () => [{ do: 'mute', inst: 'CH', on: false }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...voiceCut().slice(0, 1).map(([m, k]) => nudge(m, k, 0.2, 'rising filter for the build', 6000))],
-    drop: () => [{ do: 'mute', inst: 'BD', on: false, why: 'here comes the drop' }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...voiceCut().map(([m, k]) => nudge(m, k, 0.25, 'open up', 900)), K('mixer', 'master', 0.85)],
-    break: () => [{ do: 'mute', inst: 'BD', on: true, why: 'breakdown' }, nudge('mixer', 'verb', 0.25, 'wash it out', 2500)],
-    peak: () => [{ do: 'mute', inst: 'BD', on: false }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...(routed('acid') ? [nudge('acid', 'drive', 0.2, 'peak-time grit')] : []), ...(routed('titan') ? [nudge('titan', 'drive', 0.2)] : []), K('mixer', 'verb', 0.3)],
-    outro: () => [{ do: 'mute', inst: 'SD', on: true }, { do: 'mute', inst: 'CP', on: true }, ...voiceCut().map(([m, k]) => nudge(m, k, -0.25, 'wind it down', 5000))]
+    intro: () => [...secPat('C', 'intro pattern'), { do: 'mute', inst: 'BD', on: true, why: 'start without the kick' }, { do: 'mute', inst: 'SD', on: true }, { do: 'mute', inst: 'CP', on: true }, ...voiceCut().map(([m, k]) => K(m, k, 0.15, 'start dark', 2500))],
+    build: () => [...secPat('A', 'build pattern'), { do: 'mute', inst: 'CH', on: false }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...voiceCut().slice(0, 1).map(([m, k]) => nudge(m, k, 0.2, 'rising filter for the build', 6000))],
+    drop: () => [...secPat('B', 'drop pattern'), { do: 'mute', inst: 'BD', on: false, why: 'here comes the drop' }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...voiceCut().map(([m, k]) => nudge(m, k, 0.25, 'open up', 900)), K('mixer', 'master', 0.85)],
+    break: () => [...secPat('C', 'break pattern'), { do: 'mute', inst: 'BD', on: true, why: 'breakdown' }, nudge('mixer', 'verb', 0.25, 'wash it out', 2500)],
+    peak: () => [...secPat('B', 'peak pattern'), { do: 'mute', inst: 'BD', on: false }, { do: 'mute', inst: 'SD', on: false }, { do: 'mute', inst: 'CP', on: false }, ...(routed('acid') ? [nudge('acid', 'drive', 0.2, 'peak-time grit')] : []), ...(routed('titan') ? [nudge('titan', 'drive', 0.2)] : []), K('mixer', 'verb', 0.3)],
+    outro: () => [...secPat('C', 'outro pattern'), { do: 'mute', inst: 'SD', on: true }, { do: 'mute', inst: 'CP', on: true }, ...voiceCut().map(([m, k]) => nudge(m, k, -0.25, 'wind it down', 5000))]
   };
 
   // ======================= CLAUDE PLANNER =======================
@@ -471,13 +601,21 @@ ACTIONS (JSON objects):
 {"do":"mute","inst":"BD","on":true}
 {"do":"route","mod":"id","level":0-1,"send":0-1}  (patches mod.OUT to its mixer channel)
 {"do":"transport","run":true}
+{"do":"pattern","mod":"seqId","pat":"A".."H","notes":[16],"accents":[],"slides":[],"probs":[16 values 0-1],"ratchets":[16 values 1-4]}  (each sequencer holds 8 patterns)
+{"do":"copy","mod":"seqId","from":"A","to":"B"}
+{"do":"select","mod":"seqId","pat":"B"}  (switches when the current pattern ends)
+{"do":"song","mod":"seqId","chain":[["A",4],["B",2],["C",1]],"on":true}  (song mode chains patterns with repeat counts)
+{"do":"add","type":"<module type>","id":"newId","model":"for Analog: ${Mods.MODELS.join('|')}"}  (adds a new module to the rack; choose an unused id, then patch it)
+{"do":"remove","mod":"id"}
 {"do":"say","text":"short first-person narration of your intent"}
+
+ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}, ids like ${t.prefix}3)`).join('; ')}. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
 
 Reply with JSON only:
 {"summary":"one sentence","targets":{"energy":0-1,"brightness":0-1},
  "design":[30-70 actions that build the patch from the current state, starting with a say, ending with transport run true],
  "sections":${p.mode === 'perform' ? '[5-9 sections, each {"name":"...","fraction":share of the set,"energy":0-1,"actions":[3-10 actions fired when the section starts]}]' : '[]'}}
-Make it musical and true to the personality. Use the modules the task and personality call for.`;
+Build complex, layered patches: add extra sequencers and voices when they serve the music, give sequencers several patterns and a song. Make it musical and true to the personality. Use the modules the task and personality call for.`;
     A.think('Asking Claude', 'Claude is composing a plan for the patch and the set. This can take up to a minute.');
     A.log('sys', 'sent the brief, module catalog and current patch to Claude');
     let chars = 0;
@@ -517,7 +655,21 @@ Make it musical and true to the personality. Use the modules the task and person
       if (!E.findCable('monitor', 'IN')) await run(P('mixer.OUT', 'monitor.IN', 'connect the mixer to the speakers'));
       let acts, bpm;
       if (plan) { acts = plan.design; if (plan.targets) { target.energy = clamp(+plan.targets.energy || target.energy); target.bright = clamp(+plan.targets.brightness || target.bright); } }
-      else { const r = (RECIPES[p.genre] || RECIPES.techno)(p); acts = r.acts; bpm = r.bpm + Math.round(p.tr.aggression * 6 - p.tr.calm * 10); }
+      else {
+        const r = (RECIPES[p.genre] || RECIPES.techno)(p); acts = r.acts; bpm = r.bpm + Math.round(p.tr.aggression * 6 - p.tr.calm * 10);
+        // every main sequencer gets B/C/D patterns and a song; song mode plays it for designs, the performer switches by hand in a set
+        const songOn = p.mode !== 'perform';
+        const extra = [];
+        acts.filter(a => a.do === 'steps').forEach(a => { a.do = 'pattern'; a.pat = 'A'; extra.push(...songify(a.mod, a, songOn)); });
+        acts = acts.concat(extra);
+        const reserved = new Set(CORE_IDS);
+        for (let i = 0; i < p.complex; i++) acts = acts.concat(newLayer(p, reserved, songOn || p.songWanted));
+      }
+      // Bring back any built-in module the plan needs that was removed from the rack
+      const CORE = { seq1: ['StepSeq', { name: 'Sequencer A', stripe: '#f2b632' }], seq2: ['StepSeq', { name: 'Sequencer B', stripe: '#3e8ef0' }], ent: ['Entropy'], drums: ['Drums'], acid: ['Analog', { model: 'ACID', name: 'Voice 303', stripe: '#f2b632' }], lead: ['Analog', { model: 'JOVE', name: 'Voice Poly', stripe: '#3e8ef0' }], geiger: ['Geiger'], titan: ['Titan'], chip: ['Chip'], bodies: ['Bodies'], slope: ['Slope'], fold: ['Fold'], vcfq: ['VCFQ'] };
+      const used = new Set(); const addIds = new Set(acts.filter(a => a.do === 'add').map(a => a.id));
+      acts.forEach(a => { [a.mod, a.from, a.to].forEach(v => { if (typeof v === 'string') used.add(v.split('.')[0]); }); });
+      for (const id of used) if (!E.mods[id] && CORE[id] && !addIds.has(id)) { if (A.abort) break; const [type, o = {}] = CORE[id]; await run({ do: 'add', type, id, ...o, why: 'this patch needs it back' }); }
       // Unplug what the new patch does not use (keeps the mixer → monitor connection)
       const keep = new Set(acts.filter(a => a.do === 'patch').map(a => a.to));
       acts.filter(a => a.do === 'route').forEach(a => keep.add(`mixer.IN${MIXCH[a.mod] || 0}`));

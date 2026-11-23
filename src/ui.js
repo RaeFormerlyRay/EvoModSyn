@@ -69,29 +69,61 @@ const UI = (() => {
       m.ui = { blink: (bar) => { led.classList.add('flash'); led.style.background = bar ? '' : '#ffb03b'; setTimeout(() => { led.classList.remove('flash'); led.style.background = ''; }, 90); } };
     },
     steps(m, el) {
-      const grid = h('div', 'steps'); grid.style.setProperty('--stripe', m.stripe);
-      const cells = m.steps.map((s, i) => { const c = h('div', 'step', '<div class="bar"></div><div class="acc"></div><div class="sl"></div>'); grid.append(c); return c; });
-      const render = () => cells.forEach((c, i) => {
-        const s = m.steps[i]; c.classList.toggle('on', !!s.g); c.classList.toggle('a', !!s.a); c.classList.toggle('s', !!s.s);
-        c.querySelector('.bar').style.height = (12 + (s.n + 7) / 21 * 80) + '%';
-        c.style.opacity = i <= m.v('len') ? 1 : 0.3;
-      });
+      el.style.setProperty('--stripe', m.stripe);
+      const top = h('div', 'patrow'), pbs = [];
+      for (let i = 0; i < 8; i++) { const b = h('button', 'pb', 'ABCDEFGH'[i]); b.type = 'button'; b.title = 'Pattern ' + 'ABCDEFGH'[i] + ' (switches at the end of the current pattern while playing)'; b.onclick = () => m.queue(i); top.append(b); pbs.push(b); }
+      const songBtn = h('button', 'pb song', 'SONG'); songBtn.type = 'button'; songBtn.title = 'Song mode: play the chain below'; songBtn.onclick = () => m.setSong(null, !m.songOn); top.append(songBtn);
+      const LANES = ['PITCH', 'PROB', 'RATCH']; let lane = 0;
+      const laneBtn = h('button', 'pb lane', LANES[0]); laneBtn.type = 'button'; laneBtn.title = 'What dragging a step edits'; laneBtn.onclick = () => { lane = (lane + 1) % 3; laneBtn.textContent = LANES[lane]; render(); }; top.append(laneBtn);
+      const grid = h('div', 'steps');
+      grid.title = 'Click: gate on/off · drag up/down: edit the lane (pitch, probability or ratchets) · Alt-click: accent · Shift-click: slide';
+      const cells = Array.from({ length: 16 }, () => { const c = h('div', 'step', '<div class="bar"></div><div class="acc"></div><div class="sl"></div><span class="rt"></span>'); grid.append(c); return c; });
+      const songRow = h('div', 'songrow');
+      const render = () => {
+        cells.forEach((c, i) => {
+          const s = m.steps[i]; c.classList.toggle('on', !!s.g); c.classList.toggle('a', !!s.a); c.classList.toggle('s', !!s.s);
+          const v = lane === 0 ? (12 + (s.n + 7) / 21 * 80) : lane === 1 ? 8 + (s.p ?? 1) * 88 : 8 + ((s.r || 1) - 1) / 3 * 88;
+          c.querySelector('.bar').style.height = v + '%';
+          c.querySelector('.rt').textContent = (s.r > 1 ? '×' + s.r : '') + ((s.p ?? 1) < 1 ? ' ' + Math.round(s.p * 100) : '');
+          c.style.opacity = i <= m.v('len') ? 1 : 0.3;
+        });
+      };
+      const renderAll = () => {
+        render();
+        pbs.forEach((b, i) => { b.classList.toggle('cur', i === m.cur); b.classList.toggle('has', m.hasNotes(i)); b.classList.toggle('q', i === m.next); });
+        songBtn.classList.toggle('cur', m.songOn);
+        songRow.innerHTML = '';
+        m.song.forEach((e, k) => {
+          const c = h('button', 'sc' + (m.songOn && k === m.songIx ? ' now' : ''), `${'ABCDEFGH'[e.pat]}×${e.rep}`); c.type = 'button';
+          c.title = 'Click: more repeats · Shift-click: change pattern · Alt-click: remove';
+          c.onclick = ev => { if (ev.altKey) { if (m.song.length > 1) m.song.splice(k, 1); } else if (ev.shiftKey) e.pat = (e.pat + 1) % 8; else e.rep = e.rep >= 16 ? 1 : e.rep * 2; renderAll(); };
+          songRow.append(c);
+        });
+        const add = h('button', 'sc add', '+'); add.type = 'button'; add.title = 'Add the selected pattern to the song'; add.onclick = () => { if (m.song.length < 16) m.song.push({ pat: m.cur, rep: 2 }); renderAll(); };
+        songRow.append(add);
+      };
       let dragI = -1;
       cells.forEach((c, i) => {
         c.addEventListener('pointerdown', e => {
           if (e.altKey || e.button === 2) { m.steps[i].a ^= 1; render(); return; }
           if (e.shiftKey) { m.steps[i].s ^= 1; render(); return; }
-          dragI = i; c.setPointerCapture(e.pointerId); c._sy = e.clientY; c._moved = false; c._n = m.steps[i].n;
+          dragI = i; c.setPointerCapture(e.pointerId); c._sy = e.clientY; c._moved = false; const s = m.steps[i]; c._v = lane === 0 ? s.n : lane === 1 ? (s.p ?? 1) : (s.r || 1);
         });
-        c.addEventListener('pointermove', e => { if (dragI !== i) return; const dy = c._sy - e.clientY; if (Math.abs(dy) > 4) { c._moved = true; m.steps[i].n = Math.round(Math.max(-7, Math.min(14, c._n + dy / 6))); m.steps[i].g = 1; render(); } });
-        c.addEventListener('pointerup', () => { if (dragI === i && !c._moved) { m.steps[i].g ^= 1; render(); } dragI = -1; });
+        c.addEventListener('pointermove', e => {
+          if (dragI !== i) return; const dy = c._sy - e.clientY; if (Math.abs(dy) <= 4) return; c._moved = true; const s = m.steps[i];
+          if (lane === 0) { s.n = Math.round(Math.max(-7, Math.min(14, c._v + dy / 6))); s.g = 1; }
+          else if (lane === 1) s.p = Math.round(Math.max(0, Math.min(1, c._v + dy / 60)) * 20) / 20;
+          else s.r = Math.max(1, Math.min(4, Math.round(c._v + dy / 15)));
+          renderAll();
+        });
+        c.addEventListener('pointerup', () => { if (dragI === i && !c._moved) { m.steps[i].g ^= 1; renderAll(); } dragI = -1; });
         c.addEventListener('contextmenu', e => e.preventDefault());
       });
       m.params.len.listeners.push(render);
-      el.append(grid, h('div', 'seqhelp', 'Click: gate · drag up/down: pitch · Alt-click: accent · Shift-click: slide'));
-      render();
+      el.append(top, grid, songRow);
+      renderAll();
       let cur = -1;
-      m.ui = { renderSteps: render, cursor: p => { if (cur >= 0) cells[cur].classList.remove('cur'); cells[p]?.classList.add('cur'); cur = p; }, cells };
+      m.ui = { renderSteps: renderAll, renderAll, cursor: p => { if (cur >= 0) cells[cur]?.classList.remove('cur'); cells[p]?.classList.add('cur'); cur = p; }, cells, pbs, songBtn };
     },
     entropy(m, el) {
       const c = h('canvas', 'scr'); el.append(c);
@@ -123,7 +155,7 @@ const UI = (() => {
         lcd.textContent = `${m.cpm} CPM · ${(m.cpm * 0.0057).toFixed(2)} µSv/h`;
       };
       m.ui = { flash: () => { led.classList.add('flash'); setTimeout(() => led.classList.remove('flash'), 40); }, draw };
-      U.animated.push(draw);
+      U.anim(draw);
     },
     slope(m, el) {
       const c = h('canvas', 'scr'); el.append(c); let cx = null;
@@ -208,7 +240,7 @@ const UI = (() => {
         g.fillStyle = '#9ef0b7'; g.font = '9px JetBrains Mono, monospace'; g.fillText(md, 4, 10);
       };
       m.ui = { strike: (midi) => { energy = 1; lastMidi = midi; } };
-      U.animated.push(draw);
+      U.anim(draw);
     },
     monitor(m, el) {
       const c1 = h('canvas', 'scr'), c2 = h('canvas', 'scr'); el.append(c1, c2);
@@ -230,37 +262,63 @@ const UI = (() => {
           g.fillStyle = `hsl(${190 - i * 2.2},85%,${45 + mx / 255 * 25}%)`; g.fillRect(i / N * b.w + 1, b.h - hh, b.w / N - 2, hh);
         }
       };
-      U.animated.push(draw);
+      U.anim(draw);
     }
   };
   U.animated = [];
+  let buildingId = null;
+  U.anim = f => { f._mod = buildingId; U.animated.push(f); };
+  const FIXED = new Set(['clock', 'mixer', 'monitor']);
 
   // ---------- build rack ----------
-  U.build = function () {
-    for (const id of E.order) {
-      const m = E.mods[id];
-      const el = h('div', 'mod'); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id;
-      el.innerHTML = `<div class="mod-h"><span class="nm">${m.name}</span><span class="sub">${m.sub}</span></div>`;
-      const body = h('div', 'mod-b'); el.append(body);
-      for (const sec of m.layout) {
-        if (sec.custom) { const box = h('div', 'cust'); box.style.display = 'flex'; box.style.flexDirection = 'column'; box.style.gap = '6px'; body.append(box); customs[sec.custom](m, box); }
-        else { const g = h('div', sec.cls || 'kgrid'); if (sec.c) g.classList.add('c'); sec.k.forEach(k => g.append(makeKnob(m, k))); body.append(g); }
-      }
-      const jr = h('div', 'jacks'), gi = h('div', 'grp in'), go = h('div', 'grp out');
-      Object.keys(m.ins).forEach(n => gi.append(makeJack(m, n, 'in')));
-      Object.keys(m.outs).forEach(n => go.append(makeJack(m, n, 'out')));
-      if (gi.children.length) jr.append(gi); jr.append(go); el.append(jr);
-      rack.insertBefore(el, svg);
-      U.modEls[id] = el;
+  function renderModule(m, isNew) {
+    const id = m.id; buildingId = id;
+    const el = h('div', 'mod' + (isNew ? ' mod-new' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id;
+    el.innerHTML = `<div class="mod-h"><span class="nm">${m.name}</span><span class="sub">${m.sub}</span></div>`;
+    if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; x.onclick = () => U.removeModule(id); el.querySelector('.mod-h').append(x); }
+    const body = h('div', 'mod-b'); el.append(body);
+    for (const sec of m.layout) {
+      if (sec.custom) { const box = h('div', 'cust'); box.style.display = 'flex'; box.style.flexDirection = 'column'; box.style.gap = '5px'; body.append(box); customs[sec.custom](m, box); }
+      else { const g = h('div', sec.cls || 'kgrid'); if (sec.c) g.classList.add('c'); sec.k.forEach(k => g.append(makeKnob(m, k))); body.append(g); }
     }
-    // mixer: lay the 16 channel knobs out as 8 columns
-    const mg = rack.querySelector('.mixgrid');
+    const jr = h('div', 'jacks'), gi = h('div', 'grp in'), go = h('div', 'grp out');
+    Object.keys(m.ins).forEach(n => gi.append(makeJack(m, n, 'in')));
+    Object.keys(m.outs).forEach(n => go.append(makeJack(m, n, 'out')));
+    if (gi.children.length) jr.append(gi); jr.append(go); el.append(jr);
+    const mg = el.querySelector('.mixgrid');
     if (mg) { mg.style.display = 'grid'; mg.style.gridTemplateColumns = 'repeat(8,1fr)'; mg.style.justifyItems = 'center'; }
+    rack.insertBefore(el, svg);
+    U.modEls[id] = el;
+    buildingId = null;
+    if (isNew) setTimeout(() => el.classList.remove('mod-new'), 2200);
+    return el;
+  }
+  U.build = function () {
+    for (const id of E.order) renderModule(E.mods[id]);
     new ResizeObserver(() => U.layout()).observe(rack);
     window.addEventListener('resize', () => U.layout());
     U.layout();
     E.on('change', ev => { if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
     requestAnimationFrame(frame);
+  };
+  // Add a new module of a registered type to the end of the rack; returns its id
+  U.createModule = function (type, o = {}) {
+    const T = Mods.TYPES[type]; if (!T) return null;
+    const id = o.id && !E.mods[o.id] ? o.id : E.newId(T.prefix);
+    const m = Mods.make(type, id, o);
+    E.add(m); renderModule(m, true); U.layout(); U.status();
+    E.fire('modules', { type: 'add', id });
+    return id;
+  };
+  U.removeModule = function (id) {
+    if (FIXED.has(id) || !E.mods[id]) return false;
+    E.remove(id);
+    U.modEls[id]?.remove(); delete U.modEls[id];
+    for (const k of Object.keys(U.jacks)) if (k.startsWith(id + '.')) { delete U.jacks[k]; delete U.jpos[k]; }
+    for (const k of Object.keys(U.knobs)) if (k.startsWith(id + '.')) delete U.knobs[k];
+    U.animated = U.animated.filter(f => f._mod !== id);
+    U.syncCables(); U.layout(); U.status();
+    return true;
   };
 
   U.layout = function () {

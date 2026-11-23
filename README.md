@@ -20,7 +20,7 @@ Press **Power on** (browsers only allow sound after a click), type an action suc
 | Module | What it is |
 |---|---|
 | Pulse | Master clock with tempo and swing (CLK, BEAT, BAR outs) |
-| Sequencer A / B | 16-step sequencers: pitch, gate, accent, slide, length, direction (fwd/rev/ping/random/drunk), clock divide, root, scale, octave, transpose, gate length, probability, ratchets |
+| Sequencer A / B | 16-step sequencers with 8 patterns (A–H) and a song mode that chains patterns with repeat counts. Per step: pitch, gate, accent, slide, probability and ratchets (1–4). Global: length, direction (fwd/rev/ping/random/drunk), clock divide, root, scale, octave, transpose, gate length, probability, random ratchets. PAT output fires at each pattern start |
 | Entropy | Noise-driven sequencer: white/pink/brown/chaos noise, a lockable shift register loop, density, range, slewed random CV |
 | Rhythm Composer | 808 / 909-style drum synth with 10 voices (BD SD CP CH OH LT HT RS CB CY), 808, 909, Dirt and LoFi kits, a 16-step grid and a trigger input |
 | Voice 303 / Voice Poly | Analog-modeling mono voices with 7 models: Acid (303-style), Ladder (Moog-style), Scream (MS-20-style), Jove (Jupiter-8-style), Prophecy (Prophet-5-style poly-mod), SEM (Oberheim-style), Odyssey (ARP-style) |
@@ -32,6 +32,10 @@ Press **Power on** (browsers only allow sound after a click), type an action suc
 | Mix Desk | 8 channels with sends to a tempo-synced tape delay and a plate reverb |
 | Monitor | Limiter, scope, spectrum, and the analyser the AI listens through |
 
+Use **+ Add module** in the top bar to add as many extra sequencers, voices, mixers and utilities as you like, and the × on a panel to remove it. The Monitor has four inputs, so extra mixers can be patched in.
+
+On a sequencer, the A–H buttons pick a pattern (it switches when the current one ends), SONG turns song mode on, and the PITCH/PROB/RATCH button picks what dragging a step edits. In the song chain, click an entry to double its repeats, Shift-click to change its pattern, Alt-click to remove it, and + to append the selected pattern.
+
 Jack colours: silver is audio, orange is CV, green is clock/gate/note events (green only connects to green). Drag from a jack to another jack to patch, drag a plugged input away to unplug, double-click a jack to clear it. Drag knobs up and down (Shift for fine), double-click to reset.
 
 ## The AI performer
@@ -40,5 +44,6 @@ Jack colours: silver is audio, orange is CV, green is clock/gate/note events (gr
 * **Patches visibly.** A glowing cursor travels to each jack and knob. Cables are carried across the rack and plugged in, knobs turn smoothly, sequencer steps and drum cells light up as they are written, and the log explains every move.
 * **Listens.** Every 200 ms it measures loudness, spectral brightness, low end, rhythmic motion and an overall energy score from the master output, and compares them with its targets.
 * **Learns.** It chooses among about 25 moves (filter sweeps, drive, drum mutes and fills, sequence mutations, wobble rate changes, modulation patches, layering voices in and out, delay throws and more), scores each one by how much closer it moved the sound to the target, and keeps a running value per move. Those values are saved in the browser and shown in the console, so it gets better at your rack over time.
-* **Performs.** For a set it builds an energy arc (intro, build, drop, break, build, peak, outro) across the requested length and keeps shaping the sound until the end, then fades out.
+* **Grows the rack.** It can add new modules while it works: an extra sequencer plus a voice for each new layer, and another mixer when every channel is taken. Ask for something "complex", "layered" or a "song" to get more layers. It writes patterns A–D (main, variation, stripped-back, fill) for each sequencer and chains them into a song.
+* **Performs.** For a set it builds an energy arc (intro, build, drop, break, build, peak, outro) across the requested length, switches sequencer patterns to match each section, writes new variations, adds layers, and keeps shaping the sound until the end, then fades out.
 * **Claude brain (optional).** When the page is opened as a Claude artifact, "Claude plans" sends the brief, the module catalogue and the current patch to Claude, which returns the patch design and the set's sections as actions. The built-in performer then executes them and keeps listening and adjusting.

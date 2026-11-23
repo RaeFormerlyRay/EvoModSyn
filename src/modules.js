@@ -33,8 +33,13 @@ const Mods = (() => {
 
   // ======================= STEP SEQUENCER =======================
   function StepSeq(id, name, stripe) {
-    const m = new M(id, { name, sub: '16-step pitch / gate / accent / slide', width: 392, stripe, family: 'seq' });
-    m.steps = Array.from({ length: 16 }, (_, i) => ({ n: [0, 0, 7, 0, 3, 0, 10, 5][i % 8] > 5 ? 0 : 0, g: i % 4 === 0 ? 1 : 0, a: 0, s: 0, p: 1, r: 1 }));
+    const m = new M(id, { name, sub: '8 patterns · song mode · per-step prob & ratchet', width: 392, stripe, family: 'seq' });
+    const blank = () => Array.from({ length: 16 }, () => ({ n: 0, g: 0, a: 0, s: 0, p: 1, r: 1 }));
+    m.pats = Array.from({ length: 8 }, blank);
+    m.cur = 0; m.next = null;
+    m.view = null; // a pattern shown while being edited (playback always uses m.cur)
+    Object.defineProperty(m, 'steps', { get() { return this.pats[this.view ?? this.cur]; }, set(v) { this.pats[this.view ?? this.cur] = v; } });
+    m.song = [{ pat: 0, rep: 4 }]; m.songOn = false; m.songIx = 0; m.loops = 0; m.inPat = 0;
     m.p('len', { label: 'Length', steps: Array.from({ length: 16 }, (_, i) => i + 1), def: 1, small: true });
     m.p('dir', { label: 'Dir', steps: ['FWD', 'REV', 'PING', 'RAND', 'DRUNK'], def: 0, small: true });
     m.p('div', { label: 'Div', steps: ['1/16', '1/8', '1/4', '1/32'], def: 0, small: true });
@@ -46,23 +51,41 @@ const Mods = (() => {
     m.p('prob', { label: 'Prob', min: 0, max: 1, def: 1, fmt: pct, small: true });
     m.p('ratch', { label: 'Ratchet', min: 0, max: 1, def: 0, fmt: pct, small: true });
     m.inEvent('CLK', function (e) { this.advance(e); }, 'clock in');
-    m.inEvent('RST', function () { this.pos = -1; this.dirSign = 1; }, 'reset');
-    m.outEvent('NOTE', 'pitch + gate'); m.outEvent('GATE', 'trigger per played step');
+    m.inEvent('RST', function () { this.pos = -1; this.dirSign = 1; this.inPat = 0; this.loops = 0; this.songIx = 0; if (this.songOn) this.cur = this.song[0].pat; }, 'reset');
+    m.outEvent('NOTE', 'pitch + gate'); m.outEvent('GATE', 'trigger per played step'); m.outEvent('PAT', 'trigger at each pattern start');
     const cv = constSrc(0); m.outAudio('CV', cv, 'pitch as CV', true);
     m.pos = -1; m.dirSign = 1; m.cnt = 0; m.prevSlide = false;
+    m.hasNotes = i => m.pats[i].some(s => s.g);
+    // queue a pattern: it starts when the current one finishes (immediately if stopped)
+    m.queue = function (i) { if (!E.running) { this.cur = i; this.next = null; this.pos = -1; this.inPat = 0; } else this.next = i; this.ui?.renderAll(); };
+    m.setSong = function (chain, on) {
+      if (chain && chain.length) this.song = chain.map(c => ({ pat: clamp(c.pat | 0, 0, 7), rep: clamp(c.rep | 0 || 1, 1, 64) }));
+      if (on != null) { this.songOn = !!on; if (this.songOn) { this.songIx = 0; this.loops = 0; this.cur = this.song[0].pat; this.pos = -1; this.inPat = 0; this.next = null; } }
+      this.ui?.renderAll();
+    };
+    m.onLoop = function (t) {
+      this.loops++;
+      if (this.songOn) {
+        if (this.loops >= this.song[this.songIx].rep) { this.songIx = (this.songIx + 1) % this.song.length; this.loops = 0; this.cur = this.song[this.songIx].pat; this.pos = -1; }
+      } else if (this.next != null) { this.cur = this.next; this.next = null; this.loops = 0; this.pos = -1; }
+      this.emit('PAT', { kind: 'trig', time: t });
+      E.at(t, () => this.ui?.renderAll());
+    };
     m.advance = function (e) {
       const divN = [1, 2, 4, 0.5][this.v('div')];
       if (divN >= 1) { if ((this.cnt++ % divN) !== 0) return; }
       const len = this.v('len') + 1, dir = this.params.dir.choice;
+      if (this.inPat >= len) { this.inPat = 0; this.onLoop(e.time); }
+      this.inPat++;
       if (dir === 'FWD') this.pos = (this.pos + 1) % len;
       else if (dir === 'REV') this.pos = this.pos <= 0 ? len - 1 : this.pos - 1;
       else if (dir === 'PING') { let p = this.pos + this.dirSign; if (p >= len || p < 0) { this.dirSign *= -1; p = this.pos + this.dirSign; } this.pos = clamp(p, 0, len - 1); }
       else if (dir === 'RAND') this.pos = Math.floor(Math.random() * len);
       else this.pos = ((this.pos + (Math.random() < 0.5 ? -1 : 1) + (Math.random() < 0.5 ? 1 : 0)) % len + len) % len;
-      const st = this.steps[this.pos], t = e.time, dur = (e.dur || E.sixteenth()) * Math.max(divN, 0.5);
+      const st = this.pats[this.cur][this.pos], t = e.time, dur = (e.dur || E.sixteenth()) * Math.max(divN, 0.5);
       const pos = this.pos;
       E.at(t, () => this.ui?.cursor(pos));
-      const play = st.g && Math.random() < this.v('prob') * st.p;
+      const play = st.g && Math.random() < this.v('prob') * (st.p ?? 1);
       if (!play) { this.prevSlide = false; return; }
       const midi = 12 * (this.params.oct.choice + 1) + this.v('root') + DSP.degreeToSemi(this.params.scale.choice, st.n + this.params.trans.choice);
       const reps = (st.r > 1 ? st.r : 1) * (Math.random() < this.v('ratch') ? 2 : 1);
@@ -579,10 +602,34 @@ const Mods = (() => {
     inp.connect(lim); lim.connect(vol); vol.connect(an); an.connect(ctx.destination);
     m.p('vol', { label: 'Volume', def: 0.8, fmt: pct, apply: v => smooth(vol.gain, v) });
     m.inAudio('IN', inp, 'to speakers');
+    for (let i = 2; i <= 4; i++) { const g = gain(1); g.connect(inp); m.inAudio('IN' + i, g, 'extra mixer in'); }
     m.analyser = an; m.limiter = lim;
     m.layout = [{ custom: 'monitor' }, { k: ['vol'], cls: 'kgrid c' }];
     return m;
   }
 
-  return { Clock, StepSeq, Entropy, Geiger, Slope, Fold, VCFQ, Drums, Analog, Titan, Chip, Bodies, Mixer, Monitor, INST, KITS, MODELS, DIVS, SOURCES };
+  // Module types that can be added to the rack at will (by you or by the AI)
+  const TYPES = {
+    StepSeq: { label: 'Step sequencer', prefix: 'seq', make: (id, o) => StepSeq(id, o.name || 'Sequencer ' + String.fromCharCode(65 + Math.max(0, (parseInt(id.replace(/\D/g, '')) || 1) - 1)), o.stripe || ['#f2b632', '#3e8ef0', '#45c46a', '#ef7d2e', '#a46ff0', '#ff5fa2'][(parseInt(id.replace(/\D/g, '')) || 1) % 6]) },
+    Entropy: { label: 'Entropy noise sequencer', prefix: 'ent', make: id => Entropy(id) },
+    Drums: { label: 'Rhythm Composer drums', prefix: 'drums', make: id => Drums(id) },
+    Analog: { label: 'Analog voice (7 models)', prefix: 'voice', make: (id, o) => Analog(id, o.name || 'Voice ' + (o.model || 'LADDER'), o.stripe || '#e9e6dc', o.model || 'LADDER') },
+    Titan: { label: 'Titan wavetable bass', prefix: 'titan', make: id => Titan(id) },
+    Chip: { label: 'Bitbox chip voice', prefix: 'chip', make: id => Chip(id) },
+    Bodies: { label: 'Bodies physical model', prefix: 'bodies', make: id => Bodies(id) },
+    Geiger: { label: 'Geiger counter', prefix: 'geiger', make: id => Geiger(id) },
+    Slope: { label: 'Slope function generator', prefix: 'slope', make: id => Slope(id) },
+    Fold: { label: 'Wavefolder', prefix: 'fold', make: id => Fold(id) },
+    VCFQ: { label: 'VCF-Q filter', prefix: 'vcfq', make: id => VCFQ(id) },
+    Mixer: { label: 'Mix Desk (8 more channels)', prefix: 'mixer', make: id => Mixer(id) }
+  };
+  const ALL = { Clock, StepSeq, Entropy, Geiger, Slope, Fold, VCFQ, Drums, Analog, Titan, Chip, Bodies, Mixer, Monitor };
+  // make(type, id, opts): build a module, tag its kind, and number its name when it is an extra copy
+  function make(type, id, o = {}) {
+    const m = E.build(() => TYPES[type] ? TYPES[type].make(id, o) : ALL[type](id, ...(o.args || [])));
+    m.kind = type;
+    if (TYPES[type] && type !== 'StepSeq' && /\d+$/.test(id)) m.name += ' ' + id.match(/\d+$/)[0];
+    return m;
+  }
+  return { TYPES, make, Clock, StepSeq, Entropy, Geiger, Slope, Fold, VCFQ, Drums, Analog, Titan, Chip, Bodies, Mixer, Monitor, INST, KITS, MODELS, DIVS, SOURCES };
 })();
