@@ -96,7 +96,8 @@ const AI = (() => {
   };
   const MIXCH = { acid: 1, drums: 2, titan: 3, lead: 4, chip: 5, bodies: 6, vcfq: 7, fold: 7, geiger: 8 };
 
-  async function run(a) {
+  async function run(a, h = 0) {
+    const HU = UI.hand(h);
     if (A.abort) return;
     try {
       switch (a.do) {
@@ -107,20 +108,20 @@ const AI = (() => {
           const n = normFor(p, a.to); if (n == null) { A.log('err', `skipped ${esc(a.mod)}.${esc(a.key)}: bad value`); break; }
           if (Math.abs(n - p.n) < 0.004) break;
           const before = p.display();
-          await UI.aiKnob(a.mod, a.key, n, a.ms);
+          await HU.aiKnob(a.mod, a.key, n, a.ms);
           A.log('act', `<b>turn</b> ${m.name} ${p.label} ${esc(before)} → ${esc(p.display())}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
         case 'patch': {
           const from = split(a.from), to = split(a.to);
           if (!E.canConnect(from, to)) { A.log('err', `skipped patch ${esc(a.from)} → ${esc(a.to)} (jacks do not match)`); break; }
-          await UI.aiPatch(from, to);
+          await HU.aiPatch(from, to);
           A.log('act', `<b>patch</b> ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
         case 'unpatch': {
           const to = split(a.to), c = E.findCable(to.mod, to.port);
-          if (c) { await UI.aiUnpatch(c); A.log('act', `<b>unplug</b> ${E.mods[c.from.mod].name} ${c.from.port} ✕ ${E.mods[to.mod].name} ${to.port}${a.why ? ' · ' + esc(a.why) : ''}`); }
+          if (c) { await HU.aiUnpatch(c); A.log('act', `<b>unplug</b> ${E.mods[c.from.mod].name} ${c.from.port} ✕ ${E.mods[to.mod].name} ${to.port}${a.why ? ' · ' + esc(a.why) : ''}`); }
           break;
         }
         case 'steps': case 'pattern': {
@@ -130,8 +131,8 @@ const AI = (() => {
           const notes = fit(a.notes, null), probs = fit(a.probs, 1), rats = fit(a.ratchets, 1);
           const acc = new Set(a.accents || []), sl = new Set(a.slides || []);
           const L = 'ABCDEFGH'[pi];
-          if (pi !== m.cur) { await UI.aiPoint(m.ui.pbs[pi], a.mod, `edit ${m.name} pattern ${L}`); m.view = pi; m.ui.renderAll(); }
-          await UI.aiCells(m.ui.cells, a.mod, `program ${m.name} pattern ${L}`, i => {
+          if (pi !== m.cur) { await HU.aiPoint(m.ui.pbs[pi], a.mod, `edit ${m.name} pattern ${L}`); m.view = pi; m.ui.renderAll(); }
+          await HU.aiCells(m.ui.cells, a.mod, `program ${m.name} pattern ${L}`, i => {
             const v = notes[i], cur = m.pats[pi][i];
             m.pats[pi][i] = { n: v == null ? cur.n : clamp(Math.round(v), -7, 14), g: v == null ? 0 : 1, a: acc.has(i) ? 1 : 0, s: sl.has(i) ? 1 : 0, p: clamp(+probs[i] || (probs[i] === 0 ? 0 : 1)), r: clamp(Math.round(+rats[i] || 1), 1, 4) };
             m.ui.renderAll();
@@ -143,7 +144,7 @@ const AI = (() => {
         case 'copy': {
           const m = E.mods[a.mod]; if (!m?.pats) break;
           const f = patIx(a.from), t = patIx(a.to); if (f < 0 || t < 0 || f === t) break;
-          await UI.aiPoint(m.ui.pbs[f], a.mod, `copy pattern ${'ABCDEFGH'[f]}`); await UI.aiPoint(m.ui.pbs[t], a.mod, `paste into ${'ABCDEFGH'[t]}`);
+          await HU.aiPoint(m.ui.pbs[f], a.mod, `copy pattern ${'ABCDEFGH'[f]}`); await HU.aiPoint(m.ui.pbs[t], a.mod, `paste into ${'ABCDEFGH'[t]}`);
           m.pats[t] = m.pats[f].map(s => ({ ...s })); m.ui.renderAll();
           A.log('act', `<b>copy</b> ${m.name} pattern ${'ABCDEFGH'[f]} → ${'ABCDEFGH'[t]}`);
           break;
@@ -151,8 +152,8 @@ const AI = (() => {
         case 'select': {
           const m = E.mods[a.mod]; if (!m?.pats) break;
           const pi = patIx(a.pat); if (pi < 0 || (pi === m.cur && m.next == null)) break;
-          if (m.songOn) { await UI.aiPoint(m.ui.songBtn, a.mod, 'leave song mode'); m.setSong(null, false); }
-          await UI.aiPoint(m.ui.pbs[pi], a.mod, `${m.name}: switch to ${'ABCDEFGH'[pi]}`);
+          if (m.songOn) { await HU.aiPoint(m.ui.songBtn, a.mod, 'leave song mode'); m.setSong(null, false); }
+          await HU.aiPoint(m.ui.pbs[pi], a.mod, `${m.name}: switch to ${'ABCDEFGH'[pi]}`);
           m.queue(pi);
           A.log('act', `<b>switch</b> ${m.name} to pattern ${'ABCDEFGH'[pi]}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -160,7 +161,7 @@ const AI = (() => {
         case 'song': {
           const m = E.mods[a.mod]; if (!m?.pats) break;
           const chain = (a.chain || []).map(c => Array.isArray(c) ? { pat: patIx(c[0]), rep: +c[1] || 1 } : { pat: patIx(c.pat), rep: +c.rep || 1 }).filter(c => c.pat >= 0);
-          await UI.aiPoint(m.ui.songBtn, a.mod, `${m.name}: write the song`);
+          await HU.aiPoint(m.ui.songBtn, a.mod, `${m.name}: write the song`);
           m.setSong(chain.length ? chain : null, a.on == null ? true : a.on);
           A.log('act', `<b>song</b> ${m.name}: ${m.song.map(e => 'ABCDEFGH'[e.pat] + '×' + e.rep).join(' → ')} ${m.songOn ? '(song mode on)' : '(off)'}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -172,13 +173,13 @@ const AI = (() => {
           const id = UI.createModule(a.type, { id: a.id, model: a.model, name: a.name, stripe: a.stripe });
           const el = UI.modEls[id]; U_scroll(el);
           await UI.sleep(350 * UI.speed);
-          await UI.aiPoint(el.querySelector('.nm'), id, `add ${E.mods[id].name}`);
+          await HU.aiPoint(el.querySelector('.nm'), id, `add ${E.mods[id].name}`);
           A.log('act', `<b>add module</b> ${esc(E.mods[id].name)} (${id})${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
         case 'remove': {
           const m = E.mods[a.mod]; if (!m || ['clock', 'mixer', 'monitor'].includes(a.mod)) break;
-          await UI.aiPoint(UI.modEls[a.mod].querySelector('.modx') || UI.modEls[a.mod], a.mod, `remove ${m.name}`);
+          await HU.aiPoint(UI.modEls[a.mod].querySelector('.modx') || UI.modEls[a.mod], a.mod, `remove ${m.name}`);
           UI.removeModule(a.mod); A.log('act', `<b>remove module</b> ${esc(m.name)}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
@@ -191,8 +192,8 @@ const AI = (() => {
           for (const [ins, txt] of Object.entries(rows)) { const r = m.INST.indexOf(ins); if (r < 0) continue; const pat = String(txt || '').padEnd(16, '.').slice(0, 16); for (let s = 0; s < 16; s++) { const v = pat[s] === 'X' ? 2 : (pat[s] === 'x' || pat[s] === 'o') ? 1 : 0; if (v !== m.pats[bi][r][s]) changed.push([r, s, v]); } }
           if (!changed.length) break;
           const L = 'ABCDEFGH'[bi], other = bi !== m.cur;
-          if (other) { await UI.aiPoint(m.ui.pbs[bi], 'drums', `edit drum pattern ${L}`); m.view = bi; m.ui.renderGrid(); }
-          await UI.aiCells(changed.map(([r, s]) => m.ui.cells[r][s]), 'drums', a.do === 'drumbank' ? `write drum pattern ${L}` : `write ${a.inst} pattern`, i => { const [r, s, v] = changed[i]; m.pats[bi][r][s] = v; m.ui.renderGrid(); }, a.fast ? 25 : 70);
+          if (other) { await HU.aiPoint(m.ui.pbs[bi], 'drums', `edit drum pattern ${L}`); m.view = bi; m.ui.renderGrid(); }
+          await HU.aiCells(changed.map(([r, s]) => m.ui.cells[r][s]), 'drums', a.do === 'drumbank' ? `write drum pattern ${L}` : `write ${a.inst} pattern`, i => { const [r, s, v] = changed[i]; m.pats[bi][r][s] = v; m.ui.renderGrid(); }, a.fast ? 25 : 70);
           if (other) { m.view = null; m.ui.renderGrid(); }
           A.log('act', a.do === 'drumbank' ? `<b>drums</b> pattern ${L}: ${esc(Object.entries(rows).filter(([, v]) => v && /[xX]/.test(v)).map(([k]) => k).join(' '))}${a.why ? ' · ' + esc(a.why) : ''}` : `<b>drums</b> ${esc(a.inst)} ${esc(rows[String(a.inst).toUpperCase()])}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -200,7 +201,7 @@ const AI = (() => {
         case 'mute': {
           const m = E.mods.drums, r = m.INST.indexOf(String(a.inst).toUpperCase()); if (r < 0) break;
           if (m.mute[r] === !!a.on) break;
-          await UI.aiPoint(m.ui.labels[r], 'drums', `${a.on ? 'mute' : 'unmute'} ${a.inst}`);
+          await HU.aiPoint(m.ui.labels[r], 'drums', `${a.on ? 'mute' : 'unmute'} ${a.inst}`);
           m.mute[r] = !!a.on; m.ui.renderGrid();
           A.log('act', `<b>${a.on ? 'mute' : 'unmute'}</b> ${esc(a.inst)}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -208,7 +209,7 @@ const AI = (() => {
         case 'transport': {
           if (!!a.run === E.running) break;
           const btn = UI.modEls.clock.querySelector('button');
-          await UI.aiPoint(btn, 'clock', a.run ? 'start the clock' : 'stop the clock');
+          await HU.aiPoint(btn, 'clock', a.run ? 'start the clock' : 'stop the clock');
           a.run ? E.start() : E.stop(); A.log('act', `<b>${a.run ? 'start' : 'stop'}</b> clock`); break;
         }
         case 'route': { // send a module's output into a free mixer channel (adds a mixer if every channel is taken)
@@ -218,11 +219,11 @@ const AI = (() => {
           if (ex) { mix = ex.to.mod; ch = +ex.to.port.slice(2); }
           else if (a.ch) { mix = 'mixer'; ch = a.ch; }
           else if (MIXCH[a.mod] && !E.findCable('mixer', 'IN' + MIXCH[a.mod])) { mix = 'mixer'; ch = MIXCH[a.mod]; }
-          else { const f = freeSlot(); if (f) [mix, ch] = f; else { mix = await addMixer(); ch = 1; } }
+          else { const f = freeSlot(); if (f) [mix, ch] = f; else { mix = await addMixer(h); ch = 1; } }
           if (!mix) break;
-          if (!ex) await run({ do: 'patch', from: `${a.mod}.${port}`, to: `${mix}.IN${ch}`, why: a.why || 'into the mix' });
-          if (a.level != null) await run({ do: 'knob', mod: mix, key: 'l' + ch, to: a.level });
-          if (a.send != null) await run({ do: 'knob', mod: mix, key: 's' + ch, to: a.send });
+          if (!ex) await run({ do: 'patch', from: `${a.mod}.${port}`, to: `${mix}.IN${ch}`, why: a.why || 'into the mix' }, h);
+          if (a.level != null) await run({ do: 'knob', mod: mix, key: 'l' + ch, to: a.level }, h);
+          if (a.send != null) await run({ do: 'knob', mod: mix, key: 's' + ch, to: a.send }, h);
           break;
         }
         case 'wait': await UI.sleep((a.sec || 1) * 1000); break;
@@ -239,19 +240,35 @@ const AI = (() => {
     for (const id of E.order) if (kindIs(id, 'Mixer')) for (let i = 1; i <= 8; i++) if (!E.findCable(id, 'IN' + i)) return [id, i];
     return null;
   }
-  async function addMixer() {
+  async function addMixer(h = 0) {
     const port = ['IN', 'IN2', 'IN3', 'IN4'].find(p => !E.findCable('monitor', p));
     if (!port) { A.log('err', 'every mixer channel and monitor input is taken'); return null; }
     const id = E.newId('mixer');
-    await run({ do: 'add', type: 'Mixer', id, why: 'every channel is taken, so add another mixer' });
-    await run({ do: 'patch', from: `${id}.OUT`, to: `monitor.${port}`, why: 'second mixer to the speakers' });
+    await run({ do: 'add', type: 'Mixer', id, why: 'every channel is taken, so add another mixer' }, h);
+    await run({ do: 'patch', from: `${id}.OUT`, to: `monitor.${port}`, why: 'second mixer to the speakers' }, h);
     return id;
   }
-  // one hand: the performer, the song planner and the critic take turns, one action list at a time
-  let handLock = Promise.resolve();
-  function runAll(list) {
-    const go = handLock.then(async () => { for (const a of list) { if (A.abort) return; await run(a); } });
-    handLock = go.catch(() => {});
+  // Two hands, each with its own queue: lists on the same hand take turns, the two hands work at the same time.
+  // With two hands on, back-to-back knob turns on different knobs are shared out so both hands turn at once.
+  const handLock = [Promise.resolve(), Promise.resolve()], handBusy = [0, 0];
+  const isKnob = a => a && a.do === 'knob';
+  function runAll(list, h = 0) {
+    h = UI.twoHands ? h : 0;
+    const go = handLock[h].then(async () => {
+      handBusy[h]++;
+      try {
+        for (let i = 0; i < list.length; i++) {
+          if (A.abort) return;
+          const a = list[i], b = list[i + 1], o = 1 - h;
+          if (UI.twoHands && isKnob(a) && isKnob(b) && !(a.mod === b.mod && a.key === b.key) && !handBusy[o]) {
+            // the free hand takes the second knob
+            const other = runAll([b], o);
+            await Promise.all([run(a, h), other]); i++;
+          } else await run(a, h);
+        }
+      } finally { handBusy[h]--; setTimeout(() => { if (!handBusy[h]) UI.handOff(h); }, 1500); }
+    });
+    handLock[h] = go.catch(() => {});
     return go;
   }
 

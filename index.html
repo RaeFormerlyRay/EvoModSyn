@@ -54,7 +54,13 @@
       <button class="btn stop" id="stop" disabled>Stop AI</button>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" id="follow" checked> Follow the AI around the rack</label>
+      <label class="check"><input type="checkbox" id="twohands" checked> Two hands</label>
+      <select id="follow" aria-label="What the rack view follows">
+        <option value="h0" selected>View follows hand 1</option>
+        <option value="h1">View follows hand 2</option>
+        <option value="split">Split screen: follow both</option>
+        <option value="off">View stays put</option>
+      </select>
       <label class="check"><input type="checkbox" id="fast"> Quick moves</label>
     </div>
 
@@ -96,6 +102,7 @@
   </aside>
 
   <div class="stage">
+  <div class="rackrow" id="rackrow">
   <section class="rackwrap" id="rackwrap">
     <div id="rack">
       <svg id="cables"></svg>
@@ -107,6 +114,8 @@
       <button class="btn primary" id="power2">Power on</button>
     </div>
   </section>
+  <section class="handcam" id="handcam" aria-label="Split screen: hand 2"><canvas id="camcv"></canvas><div class="camlbl" id="camlbl">② Hand 2</div></section>
+  </div>
   <section class="tl" id="tl" aria-label="Timeline"></section>
   </div>
 </main>
@@ -119,6 +128,7 @@
 <script src="src/panels.js"></script>
 <script src="src/ui.js"></script>
 <script src="src/modxui.js"></script>
+<script src="src/handcam.js"></script>
 <script src="src/theory.js"></script>
 <script src="src/ai.js"></script>
 <script src="src/song.js"></script>

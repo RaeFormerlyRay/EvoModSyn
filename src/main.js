@@ -66,7 +66,8 @@
     AI.perform($('#task').value.trim() || 'Design an acid bass patch', $('#persona').value.trim() || 'You are a versatile electronic musician', $('#brain').value);
   };
   $('#stop').onclick = () => AI.stop();
-  $('#follow').onchange = e => { UI.follow = e.target.checked; };
+  $('#follow').onchange = e => { UI.followMode = e.target.value; UI.syncFollow?.(); };
+  $('#twohands').onchange = e => UI.setTwoHands(e.target.checked);
   $('#fast').onchange = e => { UI.speed = e.target.checked ? 0.45 : 1; };
   $('#task').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#run').click(); });
 

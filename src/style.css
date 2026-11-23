@@ -270,7 +270,8 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
 
 /* ---------- timeline (DAW-style) ---------- */
 .stage{display:flex;flex-direction:column;min-width:0;min-height:0}
-.stage .rackwrap{flex:1;min-height:0}
+.stage .rackrow{flex:1;min-height:0;display:flex}
+.rackrow .rackwrap{flex:1;min-width:0}
 .tl{flex:none;height:300px;display:flex;flex-direction:column;background:#0c0d10;border-top:2px solid #000;box-shadow:0 -1px 0 #262a31 inset;position:relative;font-size:12px}
 .tl.folded{height:40px}
 .tl.folded .tl-ruler-row,.tl.folded .tl-body{display:none}
@@ -327,3 +328,18 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
 .timeline .songsec.planning{outline:1px dashed var(--ai);outline-offset:-2px;animation:blink 1.2s infinite}
 .log div.song{color:#bfe3ff}
 .log div.song b{color:#7fc9ff;font-weight:500}
+
+/* second AI hand + split-screen hand cam */
+#aihand2{position:absolute;left:0;top:0;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;pointer-events:none;z-index:8;opacity:0;transition:opacity .4s;
+  border:2px solid #ffb03b;box-shadow:0 0 18px 4px #ffb03b44,0 0 0 6px #ffb03b22;background:radial-gradient(circle,#ffb03b55,transparent 70%)}
+#aihand2.on{opacity:1}
+#aihand2 span{position:absolute;left:34px;top:4px;white-space:nowrap;font-family:var(--f-mono);font-size:10.5px;color:#fff3df;background:#1a130aee;border:1px solid #6a4a1d;padding:2px 6px;border-radius:3px}
+.mod.ai-focus2{border-color:#a87420;box-shadow:0 10px 24px #0009,0 0 0 1px #a8742066,0 0 26px #ffb03b33}
+.knob.ai2 .dial,.mod.worn .knob.ai2 .dial{box-shadow:0 3px 6px #000a,0 0 0 2px #0c0d10,0 0 0 3px #ffb03b,0 0 18px 4px #ffb03b44}
+.knob.ai2 .ring .fg{stroke:#ffb03b}
+.knob.ai2 .val{color:#ffb03b}
+.handcam{display:none;position:relative;border-left:2px solid #ffb03b55;background:#121418;overflow:hidden}
+.rackrow.split .handcam{display:block;flex:0 0 42%}
+#camcv{width:100%;height:100%;display:block}
+.camlbl{position:absolute;left:10px;top:8px;font-family:var(--f-mono);font-size:11px;color:#ffb03b;background:#0b0c0fdd;border:1px solid #6a4a1d;padding:2px 7px;border-radius:3px;pointer-events:none}
+@media (max-width:820px){.rackrow.split{flex-direction:column}.rackrow.split .handcam{flex:none;height:45vh;border-left:0;border-top:2px solid #ffb03b55}}

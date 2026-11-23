@@ -130,7 +130,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     // a section reusing the bank that is playing right now cannot be written ahead: it repeats the live patterns
     const live = S.sections[S.cur];
     if (live && live.slot === s.slot && live.dslot === s.dslot) { s.written = true; s.parts = live.parts; s.drums = live.drums; S.planning = -1; render(); return; }
-    if (S.on) await AI.runAll(writeActs(s, true));
+    if (S.on) await AI.runAll(writeActs(s, true), 1); // the second hand plans ahead while the first tweaks
     if (!s.written) s.written = S.sections[i] === s;
     S.planning = -1; render();
   }
@@ -251,7 +251,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       const v = AI.variation(m.pats[m.cur].map(x => x.g ? x.n : null), pick(['B', 'B', 'C']));
       acts = [{ do: 'steps', mod: id, notes: v.notes, ratchets: v.ratchets, accents: m.pats[m.cur].map((x, i) => x.a ? i : -1).filter(i => i >= 0), why: `${kind} looped ${bars} bars unchanged, getting same-y: ${v.why}` }];
     }
-    if (AI.busy && !S.on) AI.fixQueue.push(...acts); else AI.runAll(acts);
+    if (AI.busy && !S.on) AI.fixQueue.push(...acts); else AI.runAll(acts, 1);
   }
 
   // ======================= RUNNING =======================

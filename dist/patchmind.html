@@ -275,7 +275,8 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
 
 /* ---------- timeline (DAW-style) ---------- */
 .stage{display:flex;flex-direction:column;min-width:0;min-height:0}
-.stage .rackwrap{flex:1;min-height:0}
+.stage .rackrow{flex:1;min-height:0;display:flex}
+.rackrow .rackwrap{flex:1;min-width:0}
 .tl{flex:none;height:300px;display:flex;flex-direction:column;background:#0c0d10;border-top:2px solid #000;box-shadow:0 -1px 0 #262a31 inset;position:relative;font-size:12px}
 .tl.folded{height:40px}
 .tl.folded .tl-ruler-row,.tl.folded .tl-body{display:none}
@@ -333,6 +334,21 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
 .log div.song{color:#bfe3ff}
 .log div.song b{color:#7fc9ff;font-weight:500}
 
+/* second AI hand + split-screen hand cam */
+#aihand2{position:absolute;left:0;top:0;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;pointer-events:none;z-index:8;opacity:0;transition:opacity .4s;
+  border:2px solid #ffb03b;box-shadow:0 0 18px 4px #ffb03b44,0 0 0 6px #ffb03b22;background:radial-gradient(circle,#ffb03b55,transparent 70%)}
+#aihand2.on{opacity:1}
+#aihand2 span{position:absolute;left:34px;top:4px;white-space:nowrap;font-family:var(--f-mono);font-size:10.5px;color:#fff3df;background:#1a130aee;border:1px solid #6a4a1d;padding:2px 6px;border-radius:3px}
+.mod.ai-focus2{border-color:#a87420;box-shadow:0 10px 24px #0009,0 0 0 1px #a8742066,0 0 26px #ffb03b33}
+.knob.ai2 .dial,.mod.worn .knob.ai2 .dial{box-shadow:0 3px 6px #000a,0 0 0 2px #0c0d10,0 0 0 3px #ffb03b,0 0 18px 4px #ffb03b44}
+.knob.ai2 .ring .fg{stroke:#ffb03b}
+.knob.ai2 .val{color:#ffb03b}
+.handcam{display:none;position:relative;border-left:2px solid #ffb03b55;background:#121418;overflow:hidden}
+.rackrow.split .handcam{display:block;flex:0 0 42%}
+#camcv{width:100%;height:100%;display:block}
+.camlbl{position:absolute;left:10px;top:8px;font-family:var(--f-mono);font-size:11px;color:#ffb03b;background:#0b0c0fdd;border:1px solid #6a4a1d;padding:2px 7px;border-radius:3px;pointer-events:none}
+@media (max-width:820px){.rackrow.split{flex-direction:column}.rackrow.split .handcam{flex:none;height:45vh;border-left:0;border-top:2px solid #ffb03b55}}
+
 </style>
 
 <header class="top">
@@ -377,7 +393,13 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
       <button class="btn stop" id="stop" disabled>Stop AI</button>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" id="follow" checked> Follow the AI around the rack</label>
+      <label class="check"><input type="checkbox" id="twohands" checked> Two hands</label>
+      <select id="follow" aria-label="What the rack view follows">
+        <option value="h0" selected>View follows hand 1</option>
+        <option value="h1">View follows hand 2</option>
+        <option value="split">Split screen: follow both</option>
+        <option value="off">View stays put</option>
+      </select>
       <label class="check"><input type="checkbox" id="fast"> Quick moves</label>
     </div>
 
@@ -419,6 +441,7 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
   </aside>
 
   <div class="stage">
+  <div class="rackrow" id="rackrow">
   <section class="rackwrap" id="rackwrap">
     <div id="rack">
       <svg id="cables"></svg>
@@ -430,6 +453,8 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
       <button class="btn primary" id="power2">Power on</button>
     </div>
   </section>
+  <section class="handcam" id="handcam" aria-label="Split screen: hand 2"><canvas id="camcv"></canvas><div class="camlbl" id="camlbl">② Hand 2</div></section>
+  </div>
   <section class="tl" id="tl" aria-label="Timeline"></section>
   </div>
 </main>
@@ -2220,7 +2245,7 @@ const UI = (() => {
     const cs = g.querySelectorAll('circle'); cs[0].setAttribute('cx', a.x); cs[0].setAttribute('cy', a.y); cs[1].setAttribute('cx', b.x); cs[1].setAttribute('cy', b.y);
     g.classList.toggle('ai', !!ai);
   }
-  let tempEl = null;
+  const tempEls = [null, null, null];
   function drawAllCables() {
     const t = performance.now();
     for (const c of E.cables) {
@@ -2229,10 +2254,10 @@ const UI = (() => {
       const glowing = (c.ai && t - c.ai < 1800) || c.glowUntil > t;
       drawCable(g, a, b, c.born, glowing);
     }
-    if (U.temp) {
-      if (!tempEl) tempEl = mkCableEl(U.temp.color);
-      drawCable(tempEl, U.temp.a, U.temp.b, null, U.temp.ai);
-    } else if (tempEl) { tempEl.remove(); tempEl = null; }
+    [U.temp, U.hands?.[0].temp, U.hands?.[1].temp].forEach((tp, k) => {
+      if (tp) { if (!tempEls[k]) tempEls[k] = mkCableEl(tp.color); drawCable(tempEls[k], tp.a, tp.b, null, tp.ai); }
+      else if (tempEls[k]) { tempEls[k].remove(); tempEls[k] = null; }
+    });
   }
 
   // ---------- user patching ----------
@@ -2268,11 +2293,18 @@ const UI = (() => {
     drag = null; U.temp = null;
   }
 
-  // ---------- AI hand ----------
-  const handPos = { x: 40, y: 40 };
-  U.follow = true;
-  function ensureVisible(x, y) {
-    if (!U.follow) return 0;
+  // ---------- AI hands ----------
+  // Two independent cursors. Hand 1 (cyan) and hand 2 (amber) each move, carry cables and turn knobs on their own.
+  const hand2 = h('div', '', '<span></span>'); hand2.id = 'aihand2'; hand.after(hand2);
+  const hands = [{ el: hand, lbl: handLbl, pos: { x: 40, y: 40 }, temp: null, focus: null }, { el: hand2, lbl: hand2.querySelector('span'), pos: { x: 120, y: 60 }, temp: null, focus: null }];
+  U.hands = hands;
+  U.twoHands = true;
+  U.followMode = 'h0'; // 'off' | 'h0' | 'h1' | 'split'
+  Object.defineProperty(U, 'follow', { get: () => U.followMode !== 'off', set: v => { U.followMode = v ? (U.followMode === 'off' ? 'h0' : U.followMode) : 'off'; } });
+  const hix = hi => (U.twoHands && hi === 1 ? 1 : 0);
+  function ensureVisible(x, y, hi) {
+    const mode = U.followMode;
+    if (mode === 'off' || !(mode === 'h' + hi || (mode === 'split' && hi === 0) || (!U.twoHands && hi === 0))) return 0;
     const vw = wrap.clientWidth, vh = wrap.clientHeight, sx = wrap.scrollLeft, sy = wrap.scrollTop, m = 80;
     let nx = sx, ny = sy;
     if (x < sx + m) nx = x - m * 2; else if (x > sx + vw - m) nx = x - vw + m * 2;
@@ -2280,90 +2312,101 @@ const UI = (() => {
     if (nx !== sx || ny !== sy) { wrap.scrollTo({ left: Math.max(0, nx), top: Math.max(0, ny), behavior: 'smooth' }); return 380; }
     return 0;
   }
-  U.handTo = async function (x, y, label, ms) {
-    hand.classList.add('on'); if (label != null) handLbl.textContent = label;
-    const w = ensureVisible(x, y); if (w) await sleep(w * U.speed);
-    const sx = handPos.x, sy = handPos.y, dist = Math.hypot(x - sx, y - sy);
+  const focusCls = ['ai-focus', 'ai-focus2'];
+  function focus(id, hi) { hands[hi].focus = id; Object.entries(U.modEls).forEach(([k, e]) => e.classList.toggle(focusCls[hi], k === id)); }
+  async function handTo(hi, x, y, label, ms) {
+    const H = hands[hi];
+    H.el.classList.add('on'); if (label != null) H.lbl.textContent = (U.twoHands ? (hi ? '② ' : '① ') : '') + label;
+    const w = ensureVisible(x, y, hi); if (w) await sleep(w * U.speed);
+    const sx = H.pos.x, sy = H.pos.y, dist = Math.hypot(x - sx, y - sy);
     const dur = (ms ?? Math.min(900, 220 + dist * 0.6)) * U.speed;
     const t0 = performance.now();
     await new Promise(res => {
       const step = () => {
         const k = Math.min(1, (performance.now() - t0) / dur), e = ease(k);
-        handPos.x = sx + (x - sx) * e; handPos.y = sy + (y - sy) * e - Math.sin(k * Math.PI) * Math.min(60, dist * 0.12);
-        hand.style.transform = `translate(${handPos.x}px,${handPos.y}px)`;
-        if (U.temp && U.temp.followHand) U.temp.b = { x: handPos.x, y: handPos.y };
+        H.pos.x = sx + (x - sx) * e; H.pos.y = sy + (y - sy) * e - Math.sin(k * Math.PI) * Math.min(60, dist * 0.12);
+        H.el.style.transform = `translate(${H.pos.x}px,${H.pos.y}px)`;
+        if (H.temp && H.temp.followHand) H.temp.b = { x: H.pos.x, y: H.pos.y };
         k < 1 ? requestAnimationFrame(step) : res();
       };
       step();
     });
-  };
-  U.handOff = () => { hand.classList.remove('on'); Object.values(U.modEls).forEach(e => e.classList.remove('ai-focus')); };
-  U.focus = id => { Object.entries(U.modEls).forEach(([k, e]) => e.classList.toggle('ai-focus', k === id)); };
+  }
   const knobCenter = (id, key) => { const el = U.knobs[id + '.' + key]; if (!el) return null; const rr = rack.getBoundingClientRect(), r = el.querySelector('.dial').getBoundingClientRect(); return { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; };
   const elCenter = el => { const rr = rack.getBoundingClientRect(), r = el.getBoundingClientRect(); return { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; };
   U.elCenter = elCenter;
 
-  // Turn a knob to normalised value n, visibly.
-  U.aiKnob = async function (id, key, n, ms, label) {
-    const m = E.mods[id], p = m?.params[key]; if (!p) return false;
-    const c = knobCenter(id, key); const el = U.knobs[id + '.' + key];
-    U.focus(id);
-    await U.handTo(c.x, c.y, label || `${m.name} · ${p.label}`);
-    el.classList.add('ai');
-    const n0 = p.n, dur = (ms ?? 500 + Math.abs(n - n0) * 900) * U.speed, t0 = performance.now();
-    await new Promise(res => { const st = () => { const k = Math.min(1, (performance.now() - t0) / dur); p.setNorm(n0 + (n - n0) * ease(k)); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
-    p.setNorm(n);
-    setTimeout(() => el.classList.remove('ai'), 1400);
-    return true;
-  };
-
-  U.aiPatch = async function (from, to, label) {
-    const a = U.jackXY(from.mod, 'out', from.port), b = U.jackXY(to.mod, 'in', to.port);
-    if (!a || !b || !E.canConnect(from, to)) return false;
-    const ja = U.jacks[`${from.mod}.out.${from.port}`], jb = U.jacks[`${to.mod}.in.${to.port}`];
-    const existing = E.findCable(to.mod, to.port);
-    if (existing && existing.from.mod === from.mod && existing.from.port === from.port) return true;
-    if (existing) await U.aiUnpatch(existing);
-    U.focus(from.mod);
-    await U.handTo(a.x, a.y, label || `patch ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}`);
-    ja.classList.add('ai'); await sleep(140 * U.speed);
-    U.temp = { a, b: { ...a }, color: '#52f2ff', ai: true, followHand: true };
-    U.focus(to.mod);
-    await U.handTo(b.x, b.y, null, Math.min(1300, 450 + Math.hypot(b.x - a.x, b.y - a.y) * 0.7));
-    jb.classList.add('ai');
-    U.temp = null;
-    E.connect(from, to, { ai: true });
-    setTimeout(() => { ja.classList.remove('ai'); jb.classList.remove('ai'); }, 1200);
-    await sleep(180 * U.speed);
-    return true;
-  };
-
-  U.aiUnpatch = async function (c, label) {
-    const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port);
-    U.focus(c.to.mod);
-    c.glowUntil = performance.now() + 5000;
-    await U.handTo(b.x, b.y, label || `unplug ${E.mods[c.to.mod].name} ${c.to.port}`);
-    E.disconnect(c, { ai: true });
-    U.temp = { a, b: { ...b }, color: c.color, ai: true, followHand: true };
-    const mid = { x: (a.x + b.x) / 2, y: Math.max(a.y, b.y) + 40 };
-    await U.handTo(mid.x, mid.y, null, 380);
-    U.temp = null;
-    return true;
-  };
-
-  U.aiCells = async function (els, mod, label, fn, cellMs = 70) {
-    if (!els.length) return;
-    U.focus(mod);
-    const first = elCenter(els[0]);
-    await U.handTo(first.x, first.y, label);
-    for (let i = 0; i < els.length; i++) {
-      const c = elCenter(els[i]);
-      await U.handTo(c.x, c.y, null, cellMs);
-      fn(i); els[i].classList.add('ai');
-      const el = els[i]; setTimeout(() => el.classList.remove('ai'), 900);
-    }
-  };
-  U.aiPoint = async function (el, mod, label) { U.focus(mod); const c = elCenter(el); await U.handTo(c.x, c.y, label); el.classList.add('ai'); setTimeout(() => el.classList.remove('ai'), 900); };
+  // The same set of moves for each hand: UI.hand(0) or UI.hand(1)
+  function makeHand(hi) {
+    const H = {};
+    H.handTo = (x, y, label, ms) => handTo(hi, x, y, label, ms);
+    H.focus = id => focus(id, hi);
+    // Turn a knob to normalised value n, visibly.
+    H.aiKnob = async function (id, key, n, ms, label) {
+      const m = E.mods[id], p = m?.params[key]; if (!p) return false;
+      const c = knobCenter(id, key); const el = U.knobs[id + '.' + key]; if (!c) { p.setNorm(n); return true; }
+      H.focus(id);
+      await H.handTo(c.x, c.y, label || `${m.name} · ${p.label}`);
+      el.classList.add(hi ? 'ai2' : 'ai');
+      const n0 = p.n, dur = (ms ?? 500 + Math.abs(n - n0) * 900) * U.speed, t0 = performance.now();
+      await new Promise(res => { const st = () => { const k = Math.min(1, (performance.now() - t0) / dur); p.setNorm(n0 + (n - n0) * ease(k)); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
+      p.setNorm(n);
+      setTimeout(() => el.classList.remove(hi ? 'ai2' : 'ai'), 1400);
+      return true;
+    };
+    H.aiPatch = async function (from, to, label) {
+      const a = U.jackXY(from.mod, 'out', from.port), b = U.jackXY(to.mod, 'in', to.port);
+      if (!a || !b || !E.canConnect(from, to)) return false;
+      const ja = U.jacks[`${from.mod}.out.${from.port}`], jb = U.jacks[`${to.mod}.in.${to.port}`];
+      const existing = E.findCable(to.mod, to.port);
+      if (existing && existing.from.mod === from.mod && existing.from.port === from.port) return true;
+      if (existing) await H.aiUnpatch(existing);
+      H.focus(from.mod);
+      await H.handTo(a.x, a.y, label || `patch ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}`);
+      ja.classList.add('ai'); await sleep(140 * U.speed);
+      hands[hi].temp = { a, b: { ...a }, color: hi ? '#ffb03b' : '#52f2ff', ai: true, followHand: true };
+      H.focus(to.mod);
+      await H.handTo(b.x, b.y, null, Math.min(1300, 450 + Math.hypot(b.x - a.x, b.y - a.y) * 0.7));
+      jb.classList.add('ai');
+      hands[hi].temp = null;
+      E.connect(from, to, { ai: true });
+      setTimeout(() => { ja.classList.remove('ai'); jb.classList.remove('ai'); }, 1200);
+      await sleep(180 * U.speed);
+      return true;
+    };
+    H.aiUnpatch = async function (c, label) {
+      const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port);
+      H.focus(c.to.mod);
+      c.glowUntil = performance.now() + 5000;
+      await H.handTo(b.x, b.y, label || `unplug ${E.mods[c.to.mod].name} ${c.to.port}`);
+      E.disconnect(c, { ai: true });
+      hands[hi].temp = { a, b: { ...b }, color: c.color, ai: true, followHand: true };
+      const mid = { x: (a.x + b.x) / 2, y: Math.max(a.y, b.y) + 40 };
+      await H.handTo(mid.x, mid.y, null, 380);
+      hands[hi].temp = null;
+      return true;
+    };
+    H.aiCells = async function (els, mod, label, fn, cellMs = 70) {
+      if (!els.length) return;
+      H.focus(mod);
+      const first = elCenter(els[0]);
+      await H.handTo(first.x, first.y, label);
+      for (let i = 0; i < els.length; i++) {
+        const c = elCenter(els[i]);
+        await H.handTo(c.x, c.y, null, cellMs);
+        fn(i); els[i].classList.add('ai');
+        const el = els[i]; setTimeout(() => el.classList.remove('ai'), 900);
+      }
+    };
+    H.aiPoint = async function (el, mod, label) { H.focus(mod); const c = elCenter(el); await H.handTo(c.x, c.y, label); el.classList.add('ai'); setTimeout(() => el.classList.remove('ai'), 900); };
+    return H;
+  }
+  const HANDS = [makeHand(0), makeHand(1)];
+  U.hand = hi => HANDS[hix(hi)];
+  // the single-hand API stays for older callers (hand 1)
+  ['handTo', 'focus', 'aiKnob', 'aiPatch', 'aiUnpatch', 'aiCells', 'aiPoint'].forEach(k => { U[k] = (...a) => HANDS[0][k](...a); });
+  U.handOff = hi => { (hi == null ? [0, 1] : [hi]).forEach(i => { hands[i].el.classList.remove('on'); Object.values(U.modEls).forEach(e => e.classList.remove(focusCls[i])); }); };
+  U.setTwoHands = on => { U.twoHands = !!on; if (!on) U.handOff(1); U.syncFollow?.(); };
 
   // ---------- frame loop ----------
   function frame() {
@@ -2499,6 +2542,89 @@ const UI = (() => {
       m.ui = { sh: v => { lcd.textContent = `S&H ${v >= 0 ? '+' : ''}${v.toFixed(2)} · slew ${m.params.slew.display()}`; }, led: k => lr.flash(k, 60) };
     }
   });
+})();
+
+</script>
+<script>
+// handcam.js — split screen: a second live view of the rack that follows hand 2 while the main view follows hand 1.
+// The rack exists once in the page, so this view redraws it onto a canvas: panels, displays, knobs, step and drum
+// cells, jacks, cables and both hands.
+'use strict';
+(() => {
+  const E = Engine, $ = s => document.querySelector(s);
+  const row = $('#rackrow'), cam = $('#handcam'), cv = $('#camcv'), rack = $('#rack');
+  const imgs = {}; // panel images by url
+  const panelImg = el => {
+    const v = getComputedStyle(el).getPropertyValue('--panel-img'); const m = v && v.match(/url\(["']?(.*?)["']?\)/); if (!m) return null;
+    let im = imgs[m[1]]; if (!im) { im = imgs[m[1]] = new Image(); im.src = m[1]; }
+    return im.complete && im.naturalWidth ? im : null;
+  };
+  const view = { x: 0, y: 0, ready: false };
+  let last = 0;
+  function on() { return UI.twoHands && UI.followMode === 'split'; }
+  UI.syncFollow = () => { row.classList.toggle('split', on()); };
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+    if (!on() || now - last < 40) return; last = now;
+    const W = cam.clientWidth, H = cam.clientHeight; if (!W || !H) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const hp = UI.hands[1].pos, tx = hp.x - W / 2, ty = hp.y - H / 2;
+    if (!view.ready) { view.x = tx; view.y = ty; view.ready = true; }
+    view.x += (tx - view.x) * 0.18; view.y += (ty - view.y) * 0.18;
+    const ox = -view.x, oy = -view.y;
+    g.fillStyle = '#121418'; g.fillRect(0, 0, W, H);
+    const rr = rack.getBoundingClientRect();
+    const box = el => { const r = el.getBoundingClientRect(); return { x: r.left - rr.left + ox, y: r.top - rr.top + oy, w: r.width, h: r.height }; };
+    const vis = b => b.x + b.w > 0 && b.y + b.h > 0 && b.x < W && b.y < H;
+    // modules
+    for (const [id, el] of Object.entries(UI.modEls)) {
+      const b = box(el); if (!vis(b)) continue;
+      const im = panelImg(el);
+      if (im) g.drawImage(im, b.x, b.y, b.w, b.h); else { g.fillStyle = '#1c1f25'; g.fillRect(b.x, b.y, b.w, b.h); }
+      g.strokeStyle = el.classList.contains('ai-focus2') ? '#ffb03b' : el.classList.contains('ai-focus') ? '#52f2ff' : '#0008'; g.lineWidth = el.classList.contains('ai-focus2') || el.classList.contains('ai-focus') ? 2 : 1; g.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+      const light = el.classList.contains('light');
+      g.fillStyle = light ? '#1b1b1b' : '#f1ede2'; g.font = '600 11px "Space Grotesk", system-ui, sans-serif'; g.fillText((E.mods[id]?.name || id).toUpperCase(), b.x + 10, b.y + 18);
+      el.querySelectorAll('canvas.scr').forEach(c => { const cb = box(c); if (vis(cb) && c.width) { g.fillStyle = '#0b0f0d'; g.fillRect(cb.x, cb.y, cb.w, cb.h); g.drawImage(c, cb.x, cb.y, cb.w, cb.h); } });
+      el.querySelectorAll('.lcd').forEach(c => { const cb = box(c); if (!vis(cb)) return; g.fillStyle = '#0b1a12'; g.fillRect(cb.x, cb.y, cb.w, cb.h); g.fillStyle = '#9ef0b7'; g.font = '9px "JetBrains Mono", monospace'; g.fillText(c.textContent.slice(0, 48), cb.x + 4, cb.y + cb.h / 2 + 3); });
+      el.querySelectorAll('.step, .dc').forEach(c => { const cb = box(c); if (!vis(cb)) return; const onc = c.classList.contains('on'); g.fillStyle = c.classList.contains('cur') ? '#ffffffaa' : onc ? (c.classList.contains('acc') ? '#ff7a4a' : E.mods[id]?.stripe || '#e9e6dc') : '#00000066'; if (c.classList.contains('step') && onc) { const bar = c.querySelector('.bar'); const hgt = bar ? parseFloat(bar.style.height) / 100 : 1; g.fillRect(cb.x, cb.y + cb.h * (1 - hgt), cb.w, cb.h * hgt); } else g.fillRect(cb.x + 1, cb.y + 1, cb.w - 2, cb.h - 2); });
+    }
+    // knobs
+    for (const [k, el] of Object.entries(UI.knobs)) {
+      const dial = el.querySelector('.dial'), b = box(dial); if (!vis(b)) continue;
+      const dot = k.indexOf('.'), p = E.mods[k.slice(0, dot)]?.params[k.slice(dot + 1)]; if (!p) continue;
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2, r = b.w / 2;
+      const a0 = -225 * Math.PI / 180, a = a0 + p.n * 270 * Math.PI / 180;
+      g.fillStyle = '#16181c'; g.beginPath(); g.arc(cx, cy, r * 0.78, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#ffffff22'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, r * 0.95, a0, a0 + 1.5 * Math.PI); g.stroke();
+      g.strokeStyle = el.style.getPropertyValue('--kc') || '#e9e6dc'; g.beginPath(); g.arc(cx, cy, r * 0.95, a0, a); g.stroke();
+      g.strokeStyle = '#f1ede2'; g.lineWidth = 2; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * r * 0.7, cy + Math.sin(a) * r * 0.7); g.stroke();
+      if (el.classList.contains('ai') || el.classList.contains('ai2')) { g.strokeStyle = el.classList.contains('ai2') ? '#ffb03b' : '#52f2ff'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, r * 1.15, 0, Math.PI * 2); g.stroke(); }
+      g.fillStyle = '#d8d4c8'; g.font = '8.5px "JetBrains Mono", monospace'; g.textAlign = 'center'; g.fillText(p.label, cx, b.y + b.h + 10); g.fillStyle = '#9a968c'; g.fillText(p.display(), cx, b.y + b.h + 20); g.textAlign = 'left';
+    }
+    // jacks
+    for (const k in UI.jpos) { const j = UI.jpos[k], x = j.x + ox, y = j.y + oy; if (x < -10 || y < -10 || x > W + 10 || y > H + 10) continue; g.fillStyle = '#0c0c0c'; g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#8a8a8a'; g.lineWidth = 2; g.stroke(); }
+    // cables, then the cables the hands are carrying
+    const curve = (a, b, color, w = 5) => {
+      const dx = b.x - a.x, dist = Math.hypot(dx, b.y - a.y), sag = Math.min(240, 30 + dist * 0.3) * (0.6 + 0.4 * Math.abs(dx) / (dist + 1));
+      g.strokeStyle = color; g.lineWidth = w; g.lineCap = 'round'; g.globalAlpha = 0.85; g.beginPath(); g.moveTo(a.x + ox, a.y + oy);
+      g.bezierCurveTo(a.x + dx * 0.15 + ox, a.y + sag + oy, b.x - dx * 0.15 + ox, b.y + sag + oy, b.x + ox, b.y + oy); g.stroke(); g.globalAlpha = 1;
+    };
+    for (const c of E.cables) { const a = UI.jackXY(c.from.mod, 'out', c.from.port), b = UI.jackXY(c.to.mod, 'in', c.to.port); if (a && b) curve(a, b, c.color); }
+    UI.hands.forEach(hd => { if (hd.temp) curve(hd.temp.a, hd.temp.b, hd.temp.color); });
+    // hands
+    UI.hands.forEach((hd, i) => {
+      if (!hd.el.classList.contains('on')) return;
+      const x = hd.pos.x + ox, y = hd.pos.y + oy, col = i ? '#ffb03b' : '#52f2ff';
+      g.strokeStyle = col; g.lineWidth = 2; g.fillStyle = col + '44'; g.beginPath(); g.arc(x, y, 14, 0, Math.PI * 2); g.fill(); g.stroke();
+      const t = hd.lbl.textContent; if (t) { g.font = '10.5px "JetBrains Mono", monospace'; const w = g.measureText(t).width + 12; g.fillStyle = '#0b1416ee'; g.fillRect(x + 20, y - 8, w, 18); g.fillStyle = '#f5ecd9'; g.fillText(t, x + 26, y + 5); }
+    });
+    $('#camlbl').textContent = `② Hand 2 · ${UI.hands[1].focus ? (E.mods[UI.hands[1].focus]?.name || '') : 'idle'}`;
+  }
+  requestAnimationFrame(draw);
+  UI.syncFollow();
 })();
 
 </script>
@@ -2820,7 +2946,8 @@ const AI = (() => {
   };
   const MIXCH = { acid: 1, drums: 2, titan: 3, lead: 4, chip: 5, bodies: 6, vcfq: 7, fold: 7, geiger: 8 };
 
-  async function run(a) {
+  async function run(a, h = 0) {
+    const HU = UI.hand(h);
     if (A.abort) return;
     try {
       switch (a.do) {
@@ -2831,20 +2958,20 @@ const AI = (() => {
           const n = normFor(p, a.to); if (n == null) { A.log('err', `skipped ${esc(a.mod)}.${esc(a.key)}: bad value`); break; }
           if (Math.abs(n - p.n) < 0.004) break;
           const before = p.display();
-          await UI.aiKnob(a.mod, a.key, n, a.ms);
+          await HU.aiKnob(a.mod, a.key, n, a.ms);
           A.log('act', `<b>turn</b> ${m.name} ${p.label} ${esc(before)} → ${esc(p.display())}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
         case 'patch': {
           const from = split(a.from), to = split(a.to);
           if (!E.canConnect(from, to)) { A.log('err', `skipped patch ${esc(a.from)} → ${esc(a.to)} (jacks do not match)`); break; }
-          await UI.aiPatch(from, to);
+          await HU.aiPatch(from, to);
           A.log('act', `<b>patch</b> ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
         case 'unpatch': {
           const to = split(a.to), c = E.findCable(to.mod, to.port);
-          if (c) { await UI.aiUnpatch(c); A.log('act', `<b>unplug</b> ${E.mods[c.from.mod].name} ${c.from.port} ✕ ${E.mods[to.mod].name} ${to.port}${a.why ? ' · ' + esc(a.why) : ''}`); }
+          if (c) { await HU.aiUnpatch(c); A.log('act', `<b>unplug</b> ${E.mods[c.from.mod].name} ${c.from.port} ✕ ${E.mods[to.mod].name} ${to.port}${a.why ? ' · ' + esc(a.why) : ''}`); }
           break;
         }
         case 'steps': case 'pattern': {
@@ -2854,8 +2981,8 @@ const AI = (() => {
           const notes = fit(a.notes, null), probs = fit(a.probs, 1), rats = fit(a.ratchets, 1);
           const acc = new Set(a.accents || []), sl = new Set(a.slides || []);
           const L = 'ABCDEFGH'[pi];
-          if (pi !== m.cur) { await UI.aiPoint(m.ui.pbs[pi], a.mod, `edit ${m.name} pattern ${L}`); m.view = pi; m.ui.renderAll(); }
-          await UI.aiCells(m.ui.cells, a.mod, `program ${m.name} pattern ${L}`, i => {
+          if (pi !== m.cur) { await HU.aiPoint(m.ui.pbs[pi], a.mod, `edit ${m.name} pattern ${L}`); m.view = pi; m.ui.renderAll(); }
+          await HU.aiCells(m.ui.cells, a.mod, `program ${m.name} pattern ${L}`, i => {
             const v = notes[i], cur = m.pats[pi][i];
             m.pats[pi][i] = { n: v == null ? cur.n : clamp(Math.round(v), -7, 14), g: v == null ? 0 : 1, a: acc.has(i) ? 1 : 0, s: sl.has(i) ? 1 : 0, p: clamp(+probs[i] || (probs[i] === 0 ? 0 : 1)), r: clamp(Math.round(+rats[i] || 1), 1, 4) };
             m.ui.renderAll();
@@ -2867,7 +2994,7 @@ const AI = (() => {
         case 'copy': {
           const m = E.mods[a.mod]; if (!m?.pats) break;
           const f = patIx(a.from), t = patIx(a.to); if (f < 0 || t < 0 || f === t) break;
-          await UI.aiPoint(m.ui.pbs[f], a.mod, `copy pattern ${'ABCDEFGH'[f]}`); await UI.aiPoint(m.ui.pbs[t], a.mod, `paste into ${'ABCDEFGH'[t]}`);
+          await HU.aiPoint(m.ui.pbs[f], a.mod, `copy pattern ${'ABCDEFGH'[f]}`); await HU.aiPoint(m.ui.pbs[t], a.mod, `paste into ${'ABCDEFGH'[t]}`);
           m.pats[t] = m.pats[f].map(s => ({ ...s })); m.ui.renderAll();
           A.log('act', `<b>copy</b> ${m.name} pattern ${'ABCDEFGH'[f]} → ${'ABCDEFGH'[t]}`);
           break;
@@ -2875,8 +3002,8 @@ const AI = (() => {
         case 'select': {
           const m = E.mods[a.mod]; if (!m?.pats) break;
           const pi = patIx(a.pat); if (pi < 0 || (pi === m.cur && m.next == null)) break;
-          if (m.songOn) { await UI.aiPoint(m.ui.songBtn, a.mod, 'leave song mode'); m.setSong(null, false); }
-          await UI.aiPoint(m.ui.pbs[pi], a.mod, `${m.name}: switch to ${'ABCDEFGH'[pi]}`);
+          if (m.songOn) { await HU.aiPoint(m.ui.songBtn, a.mod, 'leave song mode'); m.setSong(null, false); }
+          await HU.aiPoint(m.ui.pbs[pi], a.mod, `${m.name}: switch to ${'ABCDEFGH'[pi]}`);
           m.queue(pi);
           A.log('act', `<b>switch</b> ${m.name} to pattern ${'ABCDEFGH'[pi]}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -2884,7 +3011,7 @@ const AI = (() => {
         case 'song': {
           const m = E.mods[a.mod]; if (!m?.pats) break;
           const chain = (a.chain || []).map(c => Array.isArray(c) ? { pat: patIx(c[0]), rep: +c[1] || 1 } : { pat: patIx(c.pat), rep: +c.rep || 1 }).filter(c => c.pat >= 0);
-          await UI.aiPoint(m.ui.songBtn, a.mod, `${m.name}: write the song`);
+          await HU.aiPoint(m.ui.songBtn, a.mod, `${m.name}: write the song`);
           m.setSong(chain.length ? chain : null, a.on == null ? true : a.on);
           A.log('act', `<b>song</b> ${m.name}: ${m.song.map(e => 'ABCDEFGH'[e.pat] + '×' + e.rep).join(' → ')} ${m.songOn ? '(song mode on)' : '(off)'}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -2896,13 +3023,13 @@ const AI = (() => {
           const id = UI.createModule(a.type, { id: a.id, model: a.model, name: a.name, stripe: a.stripe });
           const el = UI.modEls[id]; U_scroll(el);
           await UI.sleep(350 * UI.speed);
-          await UI.aiPoint(el.querySelector('.nm'), id, `add ${E.mods[id].name}`);
+          await HU.aiPoint(el.querySelector('.nm'), id, `add ${E.mods[id].name}`);
           A.log('act', `<b>add module</b> ${esc(E.mods[id].name)} (${id})${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
         case 'remove': {
           const m = E.mods[a.mod]; if (!m || ['clock', 'mixer', 'monitor'].includes(a.mod)) break;
-          await UI.aiPoint(UI.modEls[a.mod].querySelector('.modx') || UI.modEls[a.mod], a.mod, `remove ${m.name}`);
+          await HU.aiPoint(UI.modEls[a.mod].querySelector('.modx') || UI.modEls[a.mod], a.mod, `remove ${m.name}`);
           UI.removeModule(a.mod); A.log('act', `<b>remove module</b> ${esc(m.name)}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
         }
@@ -2915,8 +3042,8 @@ const AI = (() => {
           for (const [ins, txt] of Object.entries(rows)) { const r = m.INST.indexOf(ins); if (r < 0) continue; const pat = String(txt || '').padEnd(16, '.').slice(0, 16); for (let s = 0; s < 16; s++) { const v = pat[s] === 'X' ? 2 : (pat[s] === 'x' || pat[s] === 'o') ? 1 : 0; if (v !== m.pats[bi][r][s]) changed.push([r, s, v]); } }
           if (!changed.length) break;
           const L = 'ABCDEFGH'[bi], other = bi !== m.cur;
-          if (other) { await UI.aiPoint(m.ui.pbs[bi], 'drums', `edit drum pattern ${L}`); m.view = bi; m.ui.renderGrid(); }
-          await UI.aiCells(changed.map(([r, s]) => m.ui.cells[r][s]), 'drums', a.do === 'drumbank' ? `write drum pattern ${L}` : `write ${a.inst} pattern`, i => { const [r, s, v] = changed[i]; m.pats[bi][r][s] = v; m.ui.renderGrid(); }, a.fast ? 25 : 70);
+          if (other) { await HU.aiPoint(m.ui.pbs[bi], 'drums', `edit drum pattern ${L}`); m.view = bi; m.ui.renderGrid(); }
+          await HU.aiCells(changed.map(([r, s]) => m.ui.cells[r][s]), 'drums', a.do === 'drumbank' ? `write drum pattern ${L}` : `write ${a.inst} pattern`, i => { const [r, s, v] = changed[i]; m.pats[bi][r][s] = v; m.ui.renderGrid(); }, a.fast ? 25 : 70);
           if (other) { m.view = null; m.ui.renderGrid(); }
           A.log('act', a.do === 'drumbank' ? `<b>drums</b> pattern ${L}: ${esc(Object.entries(rows).filter(([, v]) => v && /[xX]/.test(v)).map(([k]) => k).join(' '))}${a.why ? ' · ' + esc(a.why) : ''}` : `<b>drums</b> ${esc(a.inst)} ${esc(rows[String(a.inst).toUpperCase()])}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -2924,7 +3051,7 @@ const AI = (() => {
         case 'mute': {
           const m = E.mods.drums, r = m.INST.indexOf(String(a.inst).toUpperCase()); if (r < 0) break;
           if (m.mute[r] === !!a.on) break;
-          await UI.aiPoint(m.ui.labels[r], 'drums', `${a.on ? 'mute' : 'unmute'} ${a.inst}`);
+          await HU.aiPoint(m.ui.labels[r], 'drums', `${a.on ? 'mute' : 'unmute'} ${a.inst}`);
           m.mute[r] = !!a.on; m.ui.renderGrid();
           A.log('act', `<b>${a.on ? 'mute' : 'unmute'}</b> ${esc(a.inst)}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -2932,7 +3059,7 @@ const AI = (() => {
         case 'transport': {
           if (!!a.run === E.running) break;
           const btn = UI.modEls.clock.querySelector('button');
-          await UI.aiPoint(btn, 'clock', a.run ? 'start the clock' : 'stop the clock');
+          await HU.aiPoint(btn, 'clock', a.run ? 'start the clock' : 'stop the clock');
           a.run ? E.start() : E.stop(); A.log('act', `<b>${a.run ? 'start' : 'stop'}</b> clock`); break;
         }
         case 'route': { // send a module's output into a free mixer channel (adds a mixer if every channel is taken)
@@ -2942,11 +3069,11 @@ const AI = (() => {
           if (ex) { mix = ex.to.mod; ch = +ex.to.port.slice(2); }
           else if (a.ch) { mix = 'mixer'; ch = a.ch; }
           else if (MIXCH[a.mod] && !E.findCable('mixer', 'IN' + MIXCH[a.mod])) { mix = 'mixer'; ch = MIXCH[a.mod]; }
-          else { const f = freeSlot(); if (f) [mix, ch] = f; else { mix = await addMixer(); ch = 1; } }
+          else { const f = freeSlot(); if (f) [mix, ch] = f; else { mix = await addMixer(h); ch = 1; } }
           if (!mix) break;
-          if (!ex) await run({ do: 'patch', from: `${a.mod}.${port}`, to: `${mix}.IN${ch}`, why: a.why || 'into the mix' });
-          if (a.level != null) await run({ do: 'knob', mod: mix, key: 'l' + ch, to: a.level });
-          if (a.send != null) await run({ do: 'knob', mod: mix, key: 's' + ch, to: a.send });
+          if (!ex) await run({ do: 'patch', from: `${a.mod}.${port}`, to: `${mix}.IN${ch}`, why: a.why || 'into the mix' }, h);
+          if (a.level != null) await run({ do: 'knob', mod: mix, key: 'l' + ch, to: a.level }, h);
+          if (a.send != null) await run({ do: 'knob', mod: mix, key: 's' + ch, to: a.send }, h);
           break;
         }
         case 'wait': await UI.sleep((a.sec || 1) * 1000); break;
@@ -2963,19 +3090,35 @@ const AI = (() => {
     for (const id of E.order) if (kindIs(id, 'Mixer')) for (let i = 1; i <= 8; i++) if (!E.findCable(id, 'IN' + i)) return [id, i];
     return null;
   }
-  async function addMixer() {
+  async function addMixer(h = 0) {
     const port = ['IN', 'IN2', 'IN3', 'IN4'].find(p => !E.findCable('monitor', p));
     if (!port) { A.log('err', 'every mixer channel and monitor input is taken'); return null; }
     const id = E.newId('mixer');
-    await run({ do: 'add', type: 'Mixer', id, why: 'every channel is taken, so add another mixer' });
-    await run({ do: 'patch', from: `${id}.OUT`, to: `monitor.${port}`, why: 'second mixer to the speakers' });
+    await run({ do: 'add', type: 'Mixer', id, why: 'every channel is taken, so add another mixer' }, h);
+    await run({ do: 'patch', from: `${id}.OUT`, to: `monitor.${port}`, why: 'second mixer to the speakers' }, h);
     return id;
   }
-  // one hand: the performer, the song planner and the critic take turns, one action list at a time
-  let handLock = Promise.resolve();
-  function runAll(list) {
-    const go = handLock.then(async () => { for (const a of list) { if (A.abort) return; await run(a); } });
-    handLock = go.catch(() => {});
+  // Two hands, each with its own queue: lists on the same hand take turns, the two hands work at the same time.
+  // With two hands on, back-to-back knob turns on different knobs are shared out so both hands turn at once.
+  const handLock = [Promise.resolve(), Promise.resolve()], handBusy = [0, 0];
+  const isKnob = a => a && a.do === 'knob';
+  function runAll(list, h = 0) {
+    h = UI.twoHands ? h : 0;
+    const go = handLock[h].then(async () => {
+      handBusy[h]++;
+      try {
+        for (let i = 0; i < list.length; i++) {
+          if (A.abort) return;
+          const a = list[i], b = list[i + 1], o = 1 - h;
+          if (UI.twoHands && isKnob(a) && isKnob(b) && !(a.mod === b.mod && a.key === b.key) && !handBusy[o]) {
+            // the free hand takes the second knob
+            const other = runAll([b], o);
+            await Promise.all([run(a, h), other]); i++;
+          } else await run(a, h);
+        }
+      } finally { handBusy[h]--; setTimeout(() => { if (!handBusy[h]) UI.handOff(h); }, 1500); }
+    });
+    handLock[h] = go.catch(() => {});
     return go;
   }
 
@@ -3826,7 +3969,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     // a section reusing the bank that is playing right now cannot be written ahead: it repeats the live patterns
     const live = S.sections[S.cur];
     if (live && live.slot === s.slot && live.dslot === s.dslot) { s.written = true; s.parts = live.parts; s.drums = live.drums; S.planning = -1; render(); return; }
-    if (S.on) await AI.runAll(writeActs(s, true));
+    if (S.on) await AI.runAll(writeActs(s, true), 1); // the second hand plans ahead while the first tweaks
     if (!s.written) s.written = S.sections[i] === s;
     S.planning = -1; render();
   }
@@ -3947,7 +4090,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       const v = AI.variation(m.pats[m.cur].map(x => x.g ? x.n : null), pick(['B', 'B', 'C']));
       acts = [{ do: 'steps', mod: id, notes: v.notes, ratchets: v.ratchets, accents: m.pats[m.cur].map((x, i) => x.a ? i : -1).filter(i => i >= 0), why: `${kind} looped ${bars} bars unchanged, getting same-y: ${v.why}` }];
     }
-    if (AI.busy && !S.on) AI.fixQueue.push(...acts); else AI.runAll(acts);
+    if (AI.busy && !S.on) AI.fixQueue.push(...acts); else AI.runAll(acts, 1);
   }
 
   // ======================= RUNNING =======================
@@ -4964,7 +5107,8 @@ const TL = (() => {
     AI.perform($('#task').value.trim() || 'Design an acid bass patch', $('#persona').value.trim() || 'You are a versatile electronic musician', $('#brain').value);
   };
   $('#stop').onclick = () => AI.stop();
-  $('#follow').onchange = e => { UI.follow = e.target.checked; };
+  $('#follow').onchange = e => { UI.followMode = e.target.value; UI.syncFollow?.(); };
+  $('#twohands').onchange = e => UI.setTwoHands(e.target.checked);
   $('#fast').onchange = e => { UI.speed = e.target.checked ? 0.45 : 1; };
   $('#task').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#run').click(); });
 

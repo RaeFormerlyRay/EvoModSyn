@@ -364,7 +364,7 @@ const UI = (() => {
     const cs = g.querySelectorAll('circle'); cs[0].setAttribute('cx', a.x); cs[0].setAttribute('cy', a.y); cs[1].setAttribute('cx', b.x); cs[1].setAttribute('cy', b.y);
     g.classList.toggle('ai', !!ai);
   }
-  let tempEl = null;
+  const tempEls = [null, null, null];
   function drawAllCables() {
     const t = performance.now();
     for (const c of E.cables) {
@@ -373,10 +373,10 @@ const UI = (() => {
       const glowing = (c.ai && t - c.ai < 1800) || c.glowUntil > t;
       drawCable(g, a, b, c.born, glowing);
     }
-    if (U.temp) {
-      if (!tempEl) tempEl = mkCableEl(U.temp.color);
-      drawCable(tempEl, U.temp.a, U.temp.b, null, U.temp.ai);
-    } else if (tempEl) { tempEl.remove(); tempEl = null; }
+    [U.temp, U.hands?.[0].temp, U.hands?.[1].temp].forEach((tp, k) => {
+      if (tp) { if (!tempEls[k]) tempEls[k] = mkCableEl(tp.color); drawCable(tempEls[k], tp.a, tp.b, null, tp.ai); }
+      else if (tempEls[k]) { tempEls[k].remove(); tempEls[k] = null; }
+    });
   }
 
   // ---------- user patching ----------
@@ -412,11 +412,18 @@ const UI = (() => {
     drag = null; U.temp = null;
   }
 
-  // ---------- AI hand ----------
-  const handPos = { x: 40, y: 40 };
-  U.follow = true;
-  function ensureVisible(x, y) {
-    if (!U.follow) return 0;
+  // ---------- AI hands ----------
+  // Two independent cursors. Hand 1 (cyan) and hand 2 (amber) each move, carry cables and turn knobs on their own.
+  const hand2 = h('div', '', '<span></span>'); hand2.id = 'aihand2'; hand.after(hand2);
+  const hands = [{ el: hand, lbl: handLbl, pos: { x: 40, y: 40 }, temp: null, focus: null }, { el: hand2, lbl: hand2.querySelector('span'), pos: { x: 120, y: 60 }, temp: null, focus: null }];
+  U.hands = hands;
+  U.twoHands = true;
+  U.followMode = 'h0'; // 'off' | 'h0' | 'h1' | 'split'
+  Object.defineProperty(U, 'follow', { get: () => U.followMode !== 'off', set: v => { U.followMode = v ? (U.followMode === 'off' ? 'h0' : U.followMode) : 'off'; } });
+  const hix = hi => (U.twoHands && hi === 1 ? 1 : 0);
+  function ensureVisible(x, y, hi) {
+    const mode = U.followMode;
+    if (mode === 'off' || !(mode === 'h' + hi || (mode === 'split' && hi === 0) || (!U.twoHands && hi === 0))) return 0;
     const vw = wrap.clientWidth, vh = wrap.clientHeight, sx = wrap.scrollLeft, sy = wrap.scrollTop, m = 80;
     let nx = sx, ny = sy;
     if (x < sx + m) nx = x - m * 2; else if (x > sx + vw - m) nx = x - vw + m * 2;
@@ -424,90 +431,101 @@ const UI = (() => {
     if (nx !== sx || ny !== sy) { wrap.scrollTo({ left: Math.max(0, nx), top: Math.max(0, ny), behavior: 'smooth' }); return 380; }
     return 0;
   }
-  U.handTo = async function (x, y, label, ms) {
-    hand.classList.add('on'); if (label != null) handLbl.textContent = label;
-    const w = ensureVisible(x, y); if (w) await sleep(w * U.speed);
-    const sx = handPos.x, sy = handPos.y, dist = Math.hypot(x - sx, y - sy);
+  const focusCls = ['ai-focus', 'ai-focus2'];
+  function focus(id, hi) { hands[hi].focus = id; Object.entries(U.modEls).forEach(([k, e]) => e.classList.toggle(focusCls[hi], k === id)); }
+  async function handTo(hi, x, y, label, ms) {
+    const H = hands[hi];
+    H.el.classList.add('on'); if (label != null) H.lbl.textContent = (U.twoHands ? (hi ? '② ' : '① ') : '') + label;
+    const w = ensureVisible(x, y, hi); if (w) await sleep(w * U.speed);
+    const sx = H.pos.x, sy = H.pos.y, dist = Math.hypot(x - sx, y - sy);
     const dur = (ms ?? Math.min(900, 220 + dist * 0.6)) * U.speed;
     const t0 = performance.now();
     await new Promise(res => {
       const step = () => {
         const k = Math.min(1, (performance.now() - t0) / dur), e = ease(k);
-        handPos.x = sx + (x - sx) * e; handPos.y = sy + (y - sy) * e - Math.sin(k * Math.PI) * Math.min(60, dist * 0.12);
-        hand.style.transform = `translate(${handPos.x}px,${handPos.y}px)`;
-        if (U.temp && U.temp.followHand) U.temp.b = { x: handPos.x, y: handPos.y };
+        H.pos.x = sx + (x - sx) * e; H.pos.y = sy + (y - sy) * e - Math.sin(k * Math.PI) * Math.min(60, dist * 0.12);
+        H.el.style.transform = `translate(${H.pos.x}px,${H.pos.y}px)`;
+        if (H.temp && H.temp.followHand) H.temp.b = { x: H.pos.x, y: H.pos.y };
         k < 1 ? requestAnimationFrame(step) : res();
       };
       step();
     });
-  };
-  U.handOff = () => { hand.classList.remove('on'); Object.values(U.modEls).forEach(e => e.classList.remove('ai-focus')); };
-  U.focus = id => { Object.entries(U.modEls).forEach(([k, e]) => e.classList.toggle('ai-focus', k === id)); };
+  }
   const knobCenter = (id, key) => { const el = U.knobs[id + '.' + key]; if (!el) return null; const rr = rack.getBoundingClientRect(), r = el.querySelector('.dial').getBoundingClientRect(); return { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; };
   const elCenter = el => { const rr = rack.getBoundingClientRect(), r = el.getBoundingClientRect(); return { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; };
   U.elCenter = elCenter;
 
-  // Turn a knob to normalised value n, visibly.
-  U.aiKnob = async function (id, key, n, ms, label) {
-    const m = E.mods[id], p = m?.params[key]; if (!p) return false;
-    const c = knobCenter(id, key); const el = U.knobs[id + '.' + key];
-    U.focus(id);
-    await U.handTo(c.x, c.y, label || `${m.name} · ${p.label}`);
-    el.classList.add('ai');
-    const n0 = p.n, dur = (ms ?? 500 + Math.abs(n - n0) * 900) * U.speed, t0 = performance.now();
-    await new Promise(res => { const st = () => { const k = Math.min(1, (performance.now() - t0) / dur); p.setNorm(n0 + (n - n0) * ease(k)); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
-    p.setNorm(n);
-    setTimeout(() => el.classList.remove('ai'), 1400);
-    return true;
-  };
-
-  U.aiPatch = async function (from, to, label) {
-    const a = U.jackXY(from.mod, 'out', from.port), b = U.jackXY(to.mod, 'in', to.port);
-    if (!a || !b || !E.canConnect(from, to)) return false;
-    const ja = U.jacks[`${from.mod}.out.${from.port}`], jb = U.jacks[`${to.mod}.in.${to.port}`];
-    const existing = E.findCable(to.mod, to.port);
-    if (existing && existing.from.mod === from.mod && existing.from.port === from.port) return true;
-    if (existing) await U.aiUnpatch(existing);
-    U.focus(from.mod);
-    await U.handTo(a.x, a.y, label || `patch ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}`);
-    ja.classList.add('ai'); await sleep(140 * U.speed);
-    U.temp = { a, b: { ...a }, color: '#52f2ff', ai: true, followHand: true };
-    U.focus(to.mod);
-    await U.handTo(b.x, b.y, null, Math.min(1300, 450 + Math.hypot(b.x - a.x, b.y - a.y) * 0.7));
-    jb.classList.add('ai');
-    U.temp = null;
-    E.connect(from, to, { ai: true });
-    setTimeout(() => { ja.classList.remove('ai'); jb.classList.remove('ai'); }, 1200);
-    await sleep(180 * U.speed);
-    return true;
-  };
-
-  U.aiUnpatch = async function (c, label) {
-    const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port);
-    U.focus(c.to.mod);
-    c.glowUntil = performance.now() + 5000;
-    await U.handTo(b.x, b.y, label || `unplug ${E.mods[c.to.mod].name} ${c.to.port}`);
-    E.disconnect(c, { ai: true });
-    U.temp = { a, b: { ...b }, color: c.color, ai: true, followHand: true };
-    const mid = { x: (a.x + b.x) / 2, y: Math.max(a.y, b.y) + 40 };
-    await U.handTo(mid.x, mid.y, null, 380);
-    U.temp = null;
-    return true;
-  };
-
-  U.aiCells = async function (els, mod, label, fn, cellMs = 70) {
-    if (!els.length) return;
-    U.focus(mod);
-    const first = elCenter(els[0]);
-    await U.handTo(first.x, first.y, label);
-    for (let i = 0; i < els.length; i++) {
-      const c = elCenter(els[i]);
-      await U.handTo(c.x, c.y, null, cellMs);
-      fn(i); els[i].classList.add('ai');
-      const el = els[i]; setTimeout(() => el.classList.remove('ai'), 900);
-    }
-  };
-  U.aiPoint = async function (el, mod, label) { U.focus(mod); const c = elCenter(el); await U.handTo(c.x, c.y, label); el.classList.add('ai'); setTimeout(() => el.classList.remove('ai'), 900); };
+  // The same set of moves for each hand: UI.hand(0) or UI.hand(1)
+  function makeHand(hi) {
+    const H = {};
+    H.handTo = (x, y, label, ms) => handTo(hi, x, y, label, ms);
+    H.focus = id => focus(id, hi);
+    // Turn a knob to normalised value n, visibly.
+    H.aiKnob = async function (id, key, n, ms, label) {
+      const m = E.mods[id], p = m?.params[key]; if (!p) return false;
+      const c = knobCenter(id, key); const el = U.knobs[id + '.' + key]; if (!c) { p.setNorm(n); return true; }
+      H.focus(id);
+      await H.handTo(c.x, c.y, label || `${m.name} · ${p.label}`);
+      el.classList.add(hi ? 'ai2' : 'ai');
+      const n0 = p.n, dur = (ms ?? 500 + Math.abs(n - n0) * 900) * U.speed, t0 = performance.now();
+      await new Promise(res => { const st = () => { const k = Math.min(1, (performance.now() - t0) / dur); p.setNorm(n0 + (n - n0) * ease(k)); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
+      p.setNorm(n);
+      setTimeout(() => el.classList.remove(hi ? 'ai2' : 'ai'), 1400);
+      return true;
+    };
+    H.aiPatch = async function (from, to, label) {
+      const a = U.jackXY(from.mod, 'out', from.port), b = U.jackXY(to.mod, 'in', to.port);
+      if (!a || !b || !E.canConnect(from, to)) return false;
+      const ja = U.jacks[`${from.mod}.out.${from.port}`], jb = U.jacks[`${to.mod}.in.${to.port}`];
+      const existing = E.findCable(to.mod, to.port);
+      if (existing && existing.from.mod === from.mod && existing.from.port === from.port) return true;
+      if (existing) await H.aiUnpatch(existing);
+      H.focus(from.mod);
+      await H.handTo(a.x, a.y, label || `patch ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}`);
+      ja.classList.add('ai'); await sleep(140 * U.speed);
+      hands[hi].temp = { a, b: { ...a }, color: hi ? '#ffb03b' : '#52f2ff', ai: true, followHand: true };
+      H.focus(to.mod);
+      await H.handTo(b.x, b.y, null, Math.min(1300, 450 + Math.hypot(b.x - a.x, b.y - a.y) * 0.7));
+      jb.classList.add('ai');
+      hands[hi].temp = null;
+      E.connect(from, to, { ai: true });
+      setTimeout(() => { ja.classList.remove('ai'); jb.classList.remove('ai'); }, 1200);
+      await sleep(180 * U.speed);
+      return true;
+    };
+    H.aiUnpatch = async function (c, label) {
+      const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port);
+      H.focus(c.to.mod);
+      c.glowUntil = performance.now() + 5000;
+      await H.handTo(b.x, b.y, label || `unplug ${E.mods[c.to.mod].name} ${c.to.port}`);
+      E.disconnect(c, { ai: true });
+      hands[hi].temp = { a, b: { ...b }, color: c.color, ai: true, followHand: true };
+      const mid = { x: (a.x + b.x) / 2, y: Math.max(a.y, b.y) + 40 };
+      await H.handTo(mid.x, mid.y, null, 380);
+      hands[hi].temp = null;
+      return true;
+    };
+    H.aiCells = async function (els, mod, label, fn, cellMs = 70) {
+      if (!els.length) return;
+      H.focus(mod);
+      const first = elCenter(els[0]);
+      await H.handTo(first.x, first.y, label);
+      for (let i = 0; i < els.length; i++) {
+        const c = elCenter(els[i]);
+        await H.handTo(c.x, c.y, null, cellMs);
+        fn(i); els[i].classList.add('ai');
+        const el = els[i]; setTimeout(() => el.classList.remove('ai'), 900);
+      }
+    };
+    H.aiPoint = async function (el, mod, label) { H.focus(mod); const c = elCenter(el); await H.handTo(c.x, c.y, label); el.classList.add('ai'); setTimeout(() => el.classList.remove('ai'), 900); };
+    return H;
+  }
+  const HANDS = [makeHand(0), makeHand(1)];
+  U.hand = hi => HANDS[hix(hi)];
+  // the single-hand API stays for older callers (hand 1)
+  ['handTo', 'focus', 'aiKnob', 'aiPatch', 'aiUnpatch', 'aiCells', 'aiPoint'].forEach(k => { U[k] = (...a) => HANDS[0][k](...a); });
+  U.handOff = hi => { (hi == null ? [0, 1] : [hi]).forEach(i => { hands[i].el.classList.remove('on'); Object.values(U.modEls).forEach(e => e.classList.remove(focusCls[i])); }); };
+  U.setTwoHands = on => { U.twoHands = !!on; if (!on) U.handOff(1); U.syncFollow?.(); };
 
   // ---------- frame loop ----------
   function frame() {
