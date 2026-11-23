@@ -88,6 +88,20 @@ select{min-width:0;width:100%;background:var(--field);border:1px solid var(--fie
 .log div.learn{color:#e7c98a}
 .log div.sys{color:var(--ink)}
 .log div.err{color:#ff9a8a}
+.log div.critic{color:#f2b6e0}
+.log div.critic b{color:#ff8fd4;font-weight:500}
+.critpanel .row{flex-wrap:wrap;gap:6px}
+.critpanel select{background:var(--field,#14161a);color:var(--ink);border:1px solid var(--field-edge);border-radius:3px;font-size:12px;padding:2px 4px}
+.critstat{font-size:11px;color:var(--ink-faint);margin:6px 0}
+#critout .critscore{font-size:12px;color:var(--ink)}
+#critout .critscore b{font-size:20px;color:#ff8fd4;font-family:var(--f-display)}
+#critout ul{margin:6px 0;padding-left:16px;font-size:12px;line-height:1.45}
+#critout li.ok{color:#a8d7a0}
+#critout li.bad{color:#e7c98a}
+#critout li.clash{color:#ff9a8a}
+#critout .critnums{font-family:var(--f-mono);font-size:10px;color:var(--ink-faint)}
+#critimg{width:100%;border-radius:3px;margin-top:6px;border:1px solid var(--field-edge)}
+#critclip{width:100%;margin-top:6px;height:32px}
 
 /* RACK */
 .rackwrap{position:relative;overflow:auto;background:

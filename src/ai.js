@@ -569,7 +569,7 @@ const AI = (() => {
       { do: 'add', type: 'StepSeq', id: seq, why: 'a new sequencer for the new layer' },
       { do: 'add', type, id: vid, model, why: 'a new voice for more depth' },
       P('clock.CLK', `${seq}.CLK`), P(`${seq}.NOTE`, `${vid}.NOTE`),
-      K(seq, 'scale', ref.params.scale.choice), K(seq, 'root', ref.params.root.choice), K(seq, 'oct', low ? 1 : 3), K(seq, 'gate', low ? 0.8 : 0.5),
+      K(seq, 'scale', keyScale(p)), K(seq, 'root', keyRoot(p)), K(seq, 'oct', low ? 1 : 3), K(seq, 'gate', low ? 0.8 : 0.5),
       K(seq, 'len', low ? 16 : base.len), { do: 'pattern', mod: seq, pat: 'A', ...base, why: 'new layer: ' + base.idea },
       ...songify(seq, base, songOn),
       { do: 'route', mod: vid, level: low ? 0.55 : 0.45, send: low ? 0.1 : 0.4 }];
@@ -696,7 +696,7 @@ const AI = (() => {
     A.think(A.stateName || 'Performing', `Energy ${Math.round(ears.energy * 100)}% vs target ${Math.round(target.energy * 100)}%. Brightness ${Math.round(ears.bright * 100)}% vs ${Math.round(target.bright * 100)}%. Trying "${name}".`);
     await runAll(mv.make());
     if (mv.fx.novelty) A.lastNovel = performance.now();
-    A.lastMove = name;
+    A.lastMove = name; (A.movesSince = A.movesSince || []).push(name);
     await UI.sleep(2600);
     if (A.abort) return;
     const e1 = errNow();
@@ -891,6 +891,7 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
           await runAll(scripted);
           continue;
         }
+        if (A.fixQueue.length) { await runAll(A.fixQueue.splice(0)); continue; }
         await shapeOnce();
         const pause = (2200 + rnd() * 3500) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.4);
         await UI.sleep(pause);
@@ -905,7 +906,7 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
     } else {
       A.stateName = 'Listening and tuning';
       const n = p.mode === 'tweak' ? 6 : 5;
-      for (let i = 0; i < n && !A.abort; i++) { await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
+      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
       if (!A.abort) { A.think('Patch ready', `Done. The ${p.genre} patch keeps playing. Ask for changes like "make it darker" or "add the geiger counter", or run a live set.`); A.log('sys', 'patch ready'); }
     }
     finish();
@@ -915,6 +916,23 @@ Build complex, layered patches: add extra sequencers and voices when they serve 
     A.sections = A.sections && !A.abort ? A.sections : A.sections; setBusy(false);
   }
   A.stop = () => { A.abort = true; };
+  // ----- hooks for the self-critic (critic.js) -----
+  A.fixQueue = [];
+  A.catalog = catalog; A.target = target; A.moves = MOVES; A.activeSeqs = activeSeqs; A.routed = routed; A.voiceCut = voiceCut;
+  // run fixes now if the AI is idle, otherwise hand them to the performer between moves
+  A.applyFixes = async function (list) {
+    if (!list.length) return;
+    if (A.busy) { A.fixQueue.push(...list); return; }
+    A.abort = false; setBusy(true); A.stateName = 'Correcting course';
+    try { await runAll(list); } finally { setBusy(false); }
+  };
+  // nudge the learned value of the moves made since the last critique
+  A.creditMoves = function (r) {
+    const names = A.movesSince || []; A.movesSince = [];
+    for (const name of new Set(names)) { const q = A.q[name] || { v: 0, n: 0 }; q.v += 0.15 * (r - q.v); q.n++; A.q[name] = q; }
+    if (names.length) { saveQ(); drawSkills(); }
+    return names;
+  };
   A.parseBrief = parseBrief;
   return A;
 })();

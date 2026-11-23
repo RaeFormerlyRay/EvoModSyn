@@ -53,6 +53,19 @@
 
     <div class="thought" id="thought"><span class="state" id="aistate">Idle</span><span id="aitext">Type an action, set a personality, then press Perform. The AI will patch, tweak, listen and keep playing.</span></div>
 
+    <div class="critpanel">
+      <h2>Listening back</h2>
+      <div class="row">
+        <label class="check grow"><input type="checkbox" id="criton" checked> Record the master and critique it every</label>
+        <select id="critevery" aria-label="How often to listen back"><option value="30">30 s</option><option value="60" selected>60 s</option><option value="120">2 min</option><option value="300">5 min</option></select>
+        <button class="btn" id="critnow" type="button">Listen now</button>
+      </div>
+      <div class="critstat" id="critstat">The AI records a short clip of the master, asks what works, what doesn't and what clashes, then corrects course. With the Claude brain, Claude judges it from a spectrogram and measurements.</div>
+      <div id="critout"></div>
+      <img id="critimg" alt="Spectrogram and pitch chart of the last clip" hidden>
+      <audio id="critclip" controls hidden></audio>
+    </div>
+
     <div>
       <h2>Set timeline</h2>
       <div class="timeline" id="timeline"><div class="sec">No performance running</div></div>
@@ -100,6 +113,7 @@
 <script src="src/ui.js"></script>
 <script src="src/modxui.js"></script>
 <script src="src/ai.js"></script>
+<script src="src/critic.js"></script>
 <script src="src/timeline.js"></script>
 <script src="src/main.js"></script>
 <!--BODY-END-->
