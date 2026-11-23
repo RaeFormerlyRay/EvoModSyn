@@ -349,6 +349,27 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
 .camlbl{position:absolute;left:10px;top:8px;font-family:var(--f-mono);font-size:11px;color:#ffb03b;background:#0b0c0fdd;border:1px solid #6a4a1d;padding:2px 7px;border-radius:3px;pointer-events:none}
 @media (max-width:820px){.rackrow.split{flex-direction:column}.rackrow.split .handcam{flex:none;height:45vh;border-left:0;border-top:2px solid #ffb03b55}}
 
+/* layers: two independent racks, a tab bar and a crossfader */
+.mod.offlayer{display:none}
+.layerbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 12px;background:#14161b;border-bottom:1px solid #000;font-family:var(--f-mono);font-size:11px;color:#b9b4a8}
+.ltabs{display:flex;gap:4px}
+.ltab{font:inherit;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;padding:5px 12px;border-radius:4px;border:1px solid #2b2f37;background:#1b1e24;color:#cfcabd;cursor:pointer}
+.ltab.on{background:#23343a;border-color:#2a8a95;color:#dffcff}
+.ltab[data-l="1"].on{background:#3a2c17;border-color:#a87420;color:#fff3df}
+.ltab.empty{opacity:.6;border-style:dashed}
+.xfade{display:flex;align-items:center;gap:6px}
+.xfade input{width:140px;accent-color:#ffb03b}
+.lmeters{display:flex;flex-direction:column;gap:2px;width:70px}
+.lmeters i{display:block;height:4px;border-radius:2px;background:#52f2ff;width:0;transition:width .12s linear}
+.lmeters i+i{background:#ffb03b}
+.lnote{color:#8d897f}
+body[data-layer="B"] .rackwrap{box-shadow:inset 0 0 0 2px #a8742055}
+.songsec .ly{margin-left:4px;font-size:9px;padding:0 3px;border-radius:2px;background:#2a8a9544;color:#bff6ff}
+.songsec.lyb .ly{background:#ffb03b33;color:#ffd99a}
+.songsec.lyb{background-image:linear-gradient(#ffb03b14,#ffb03b14)}
+.log div.mix{color:#c9e7a6}
+@media (max-width:820px){.xfade input{width:100px}.lnote{display:none}}
+
 </style>
 
 <header class="top">
@@ -387,6 +408,11 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
         <option value="auto">Song: automatic (verse / chorus by default)</option>
         <option value="off">No song form: loop and evolve patterns</option>
       </select>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="layerson" checked> Two layers</label>
+      <label class="check"><input type="checkbox" id="automix" checked> Auto-mix</label>
+      <button class="btn" type="button" id="mixnow">Mix now</button>
     </div>
     <div class="row">
       <button class="btn primary grow" id="run">Perform</button>
@@ -441,6 +467,13 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
   </aside>
 
   <div class="stage">
+  <div class="layerbar" id="layerbar">
+    <div class="ltabs" role="tablist" aria-label="Rack layers"><button class="ltab on" type="button" data-l="0" role="tab" aria-selected="true">Layer A</button><button class="ltab" type="button" data-l="1" role="tab" aria-selected="false">Layer B</button></div>
+    <label class="xfade" title="Crossfade the two layers' masters">A <input type="range" id="xfade" min="0" max="1000" value="0" aria-label="Crossfade between layer A and layer B"> B</label>
+    <span class="lmeters" aria-hidden="true"><i id="lma"></i><i id="lmb"></i></span>
+    <button class="btn" type="button" id="dupab" title="Duplicate the whole Layer A rack into Layer B">Copy A → B</button>
+    <span class="lnote" id="lnote">Layer B is empty</span>
+  </div>
   <div class="rackrow" id="rackrow">
   <section class="rackwrap" id="rackwrap">
     <div id="rack">
@@ -655,8 +688,28 @@ const Engine = (() => {
   const AC = window.AudioContext || window.webkitAudioContext;
   const ctx = new AC({ latencyHint: 'interactive' });
   const E = {
-    ctx, bpm: 126, swing: 0, running: false, mods: {}, order: [], cables: [],
+    ctx, bpm: 126, swing: 0, running: false,
     noise: null, uiq: [], listeners: { change: [] }, step: 0, nextTime: 0
+  };
+  // ---------- Layers ----------
+  // Two independent modular systems (Layer A and Layer B), each with its own modules, cables, chords and master
+  // bus. E.mods / E.order / E.cables / E.harmony always mean the layer in context (E.L). E.V is the layer on
+  // screen, which is also the one the hands work on. E.within(L, fn) runs fn with layer L in context.
+  E.out = ctx.createGain(); E.out.connect(ctx.destination);
+  E.outAn = ctx.createAnalyser(); E.outAn.fftSize = 2048; E.outAn.smoothingTimeConstant = 0.6; E.out.connect(E.outAn);
+  const mkLayer = i => { const bus = ctx.createGain(); bus.gain.value = i ? 0 : 1; bus.connect(E.out); return { i, name: 'AB'[i], mods: {}, order: [], cables: [], harmony: [], bus, level: i ? 0 : 1 }; };
+  E.layers = [mkLayer(0), mkLayer(1)]; E.L = 0; E.V = 0;
+  ['mods', 'order', 'cables', 'harmony'].forEach(k => Object.defineProperty(E, k, { get: () => E.layers[E.L][k], set: v => { E.layers[E.L][k] = v; } }));
+  E.within = (L, fn) => { const o = E.L; E.L = L; try { return fn(); } finally { E.L = o; } };
+  E.hasLayer = L => E.layers[L].order.length > 0;
+  E.layerName = L => 'Layer ' + 'AB'[L];
+  // fade a layer's master bus to `to` over `sec` seconds, starting at audio time `at` (default now)
+  E.fadeLayer = (L, to, sec = 0.05, at) => {
+    const g = E.layers[L].bus.gain, now = ctx.currentTime, t = Math.max(now, at ?? now);
+    if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(t); else { g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); }
+    g.linearRampToValueAtTime(to, t + Math.max(0.01, sec));
+    E.layers[L].level = to;
+    E.fire('layerfade', { L, to, sec, at: t });
   };
   // Record every source node a module starts while it is being built, so the module can be removed cleanly later
   E._collect = null;
@@ -759,7 +812,7 @@ const Engine = (() => {
     return true;
   };
   E.add = (mod) => {
-    E.mods[mod.id] = mod; E.order.push(mod.id);
+    mod.layer = E.L; E.mods[mod.id] = mod; E.order.push(mod.id);
     for (const k of mod.paramOrder) { const p = mod.params[k]; if (p.apply) { try { p.apply(p.value, p); } catch (e) { console.error(mod.id, k, e); } } }
     return mod;
   };
@@ -814,17 +867,20 @@ const Engine = (() => {
       while (E.nextTime < horizon) {
         const t = E.nextTime, dur = E.sixteenth();
         const sw = (E.step % 2 === 1) ? E.swing * dur * 0.5 : 0;
-        const clock = E.mods.clock;
-        if (clock) clock.emitTick(t + sw, E.step, dur);
+        // both layers run on the same transport so they stay in time and can crossfade on the beat
+        for (const Ly of E.layers) { const clock = Ly.mods.clock; if (clock) E.within(Ly.i, () => clock.emitTick(t + sw, E.step, dur)); }
         E.step++;
         E.nextTime += dur;
       }
     }
-    for (const id of E.order) { const m = E.mods[id]; if (!m) continue; if (m.tick !== Module.prototype.tick) m.tick(now, horizon); }
+    for (const Ly of E.layers) {
+      if (!Ly.order.length) continue;
+      E.within(Ly.i, () => { for (const id of Ly.order) { const m = Ly.mods[id]; if (!m) continue; if (m.tick !== Module.prototype.tick) m.tick(now, horizon); } });
+    }
   }
   // setInterval keeps running when the tab is hidden (throttled), rAF does not
   setInterval(pass, 25);
-  E.start = () => { if (E.running) return; E.running = true; E.step = 0; E.harmony = []; E.nextTime = ctx.currentTime + 0.06; E.fire('transport', true); };
+  E.start = () => { if (E.running) return; E.running = true; E.step = 0; E.layers.forEach(Ly => { Ly.harmony = []; }); E.nextTime = ctx.currentTime + 0.06; E.fire('transport', true); };
   E.stop = () => { if (!E.running) return; E.running = false; E.fire('transport', false); };
   E.setBpm = (b) => { E.bpm = DSP.clamp(b, 40, 220); E.fire('bpm', E.bpm); };
   return E;
@@ -1432,12 +1488,13 @@ const Mods = (() => {
     fx.connect(conv); conv.connect(vret); vret.connect(master);
     m.ch = [];
     for (let i = 1; i <= 8; i++) {
-      const inp = gain(1), lv = gain(0.7), sd = gain(0);
-      inp.connect(lv); lv.connect(master); lv.connect(sd); sd.connect(fx);
+      const inp = gain(1), lv = gain(0.7), sd = gain(0), an = ctx.createAnalyser();
+      an.fftSize = 2048; an.smoothingTimeConstant = 0; // per-channel meter for the auto-mix
+      inp.connect(lv); lv.connect(master); lv.connect(sd); sd.connect(fx); lv.connect(an);
       m.p('l' + i, { label: 'Ch' + i, def: 0.7, fmt: pct, small: true, apply: v => smooth(lv.gain, v * v * 1.4) });
       m.p('s' + i, { label: 'Fx' + i, def: 0.1, fmt: pct, small: true, apply: v => smooth(sd.gain, v * 0.9) });
       m.inAudio('IN' + i, inp, 'channel ' + i);
-      m.ch.push({ inp, lv, sd });
+      m.ch.push({ inp, lv, sd, an });
     }
     const DT = ['1/16', '1/8', '3/16', '1/4', '3/8', '1/2'], DTB = [0.25, 0.5, 0.75, 1, 1.5, 2];
     const setDT = () => smooth(dl.delayTime, Math.min(1.9, 60 / E.bpm * DTB[m.v('dtime')]), 0.08);
@@ -1458,7 +1515,7 @@ const Mods = (() => {
     const inp = gain(1), lim = ctx.createDynamicsCompressor(), vol = gain(0.8), an = ctx.createAnalyser();
     lim.threshold.value = -6; lim.knee.value = 4; lim.ratio.value = 14; lim.attack.value = 0.002; lim.release.value = 0.12;
     an.fftSize = 2048; an.smoothingTimeConstant = 0.6;
-    inp.connect(lim); lim.connect(vol); vol.connect(an); an.connect(ctx.destination);
+    inp.connect(lim); lim.connect(vol); vol.connect(an); an.connect(E.layers[E.L].bus); // each layer's monitor feeds that layer's master bus
     m.p('vol', { label: 'Volume', def: 0.8, fmt: pct, apply: v => smooth(vol.gain, v) });
     m.inAudio('IN', inp, 'to speakers');
     for (let i = 2; i <= 4; i++) { const g = gain(1); g.connect(inp); m.inAudio('IN' + i, g, 'extra mixer in'); }
@@ -1887,7 +1944,10 @@ const UI = (() => {
   const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const rack = $('#rack'), wrap = $('#rackwrap'), svg = $('#cables'), hand = $('#aihand'), handLbl = $('#aihandlbl'), readout = $('#readout');
   const SVGNS = 'http://www.w3.org/2000/svg';
-  const U = { modEls: {}, knobs: {}, jacks: {}, jpos: {}, temp: null, speed: 1 };
+  const U = { temp: null, speed: 1 };
+  // modules, knobs and jacks are kept per layer; these maps follow the layer in context (Engine.L)
+  const LU = [0, 1].map(() => ({ modEls: {}, knobs: {}, jacks: {}, jpos: {} }));
+  ['modEls', 'knobs', 'jacks', 'jpos'].forEach(k => Object.defineProperty(U, k, { get: () => LU[E.L][k] }));
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   U.sleep = sleep;
@@ -2157,13 +2217,13 @@ const UI = (() => {
   U.animated = [];
   U.customs = customs; U.fitCanvas = fitCanvas; U.h = h; // other files register panel displays here
   let buildingId = null;
-  U.anim = f => { f._mod = buildingId; U.animated.push(f); };
+  U.anim = f => { f._mod = buildingId; f._layer = E.L; U.animated.push(f); };
   const FIXED = new Set(['clock', 'mixer', 'monitor']);
 
   // ---------- build rack ----------
   function renderModule(m, isNew) {
     const id = m.id; buildingId = id;
-    const el = h('div', 'mod' + (isNew ? ' mod-new' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id;
+    const el = h('div', 'mod' + (isNew ? ' mod-new' : '') + (E.L !== E.V ? ' offlayer' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id; el.dataset.layer = E.L;
     const pk = Panels.key(m); if (pk) { el.style.setProperty('--panel-img', `url("${Panels.url(pk)}")`); el.classList.add('worn'); if (Panels.light(pk)) el.classList.add('light'); }
     el.innerHTML = `<div class="mod-h"><span class="nm">${m.name}</span><span class="sub">${m.sub}</span></div>`;
     if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; x.onclick = () => U.removeModule(id); el.querySelector('.mod-h').append(x); }
@@ -2189,7 +2249,7 @@ const UI = (() => {
     new ResizeObserver(() => U.layout()).observe(rack);
     window.addEventListener('resize', () => U.layout());
     U.layout();
-    E.on('change', ev => { if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
+    E.on('change', ev => { if (E.L !== E.V) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
     requestAnimationFrame(frame);
   };
   // Add a new module of a registered type to the end of the rack; returns its id
@@ -2201,25 +2261,36 @@ const UI = (() => {
     E.fire('modules', { type: 'add', id });
     return id;
   };
-  U.removeModule = function (id) {
-    if (FIXED.has(id) || !E.mods[id]) return false;
+  U.renderModule = renderModule;
+  U.removeModule = function (id, force) {
+    if ((FIXED.has(id) && !force) || !E.mods[id]) return false;
     E.remove(id);
     U.modEls[id]?.remove(); delete U.modEls[id];
     for (const k of Object.keys(U.jacks)) if (k.startsWith(id + '.')) { delete U.jacks[k]; delete U.jpos[k]; }
     for (const k of Object.keys(U.knobs)) if (k.startsWith(id + '.')) delete U.knobs[k];
-    U.animated = U.animated.filter(f => f._mod !== id);
-    U.syncCables(); U.layout(); U.status();
+    U.animated = U.animated.filter(f => f._mod !== id || f._layer !== E.L);
+    if (E.L === E.V) { U.syncCables(); U.layout(); U.status(); }
     return true;
+  };
+  // show one layer's rack: the other layer keeps running (and sounding, if its master is up) off screen
+  U.showLayer = function (L) {
+    E.V = L; E.L = L;
+    rack.querySelectorAll('.mod').forEach(el => el.classList.toggle('offlayer', +el.dataset.layer !== L));
+    for (const g of cabEls.values()) g.remove(); cabEls.clear();
+    U.handOff(); U.syncCables(); U.layout(); U.status();
+    document.body.dataset.layer = 'AB'[L];
+    E.fire('view', L);
   };
 
   U.layout = function () {
+    if (E.L !== E.V) return;
     const rr = rack.getBoundingClientRect();
     for (const k in U.jacks) { const r = U.jacks[k].querySelector('.hole').getBoundingClientRect(); U.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
     svg.setAttribute('width', rack.scrollWidth); svg.setAttribute('height', rack.scrollHeight);
     svg.style.width = rack.scrollWidth + 'px'; svg.style.height = rack.scrollHeight + 'px';
   };
   U.jackXY = (mod, dir, port) => U.jpos[`${mod}.${dir}.${port}`];
-  U.status = () => { $('#cpu').textContent = `${E.order.length} modules · ${E.cables.length} cables`; };
+  U.status = () => { const Ly = E.layers[E.V]; $('#cpu').textContent = `${E.layerName(E.V)} · ${Ly.order.length} modules · ${Ly.cables.length} cables`; };
 
   // ---------- cables ----------
   const cabEls = new Map();
@@ -2229,6 +2300,7 @@ const UI = (() => {
     svg.append(g); return g;
   }
   U.syncCables = function () {
+    if (E.L !== E.V) return;
     const ids = new Set(E.cables.map(c => c.id));
     for (const [id, g] of cabEls) if (!ids.has(id)) { g.remove(); cabEls.delete(id); }
     for (const c of E.cables) if (!cabEls.has(c.id)) cabEls.set(c.id, mkCableEl(c.color));
@@ -2412,7 +2484,7 @@ const UI = (() => {
   function frame() {
     E.flushUI();
     drawAllCables();
-    for (const f of U.animated) f();
+    for (const f of U.animated) if (f._layer === E.V) f();
     requestAnimationFrame(frame);
   }
 
@@ -2817,7 +2889,7 @@ Bass: root on the downbeat, fifths and octaves for movement, approach notes (a s
 Drums: intro hats/percussion only; verse kick+snare+hats; build four-on-the-floor kick with snare doubling from quarters to 8ths to 16ths; chorus everything plus open hats and a crash on the first downbeat; bridge half-time or sparse; fills on the last bar of a phrase.
 Builds: tension rises through density (snare roll, faster hats, 16th-note pedal bass), pitch (rising lines, filter opening), and space (more reverb and delay). Push-pull: right before the payoff, pull elements out (kick and bass drop for the last bar, a beat of near-silence), then push everything back in on the downbeat. Small push-pull waves inside sections (thin a bar, then bring it back) keep motion.
 Transitions: fill on the last bar, crash on the next downbeat, a reverb or delay throw on the last note. Final chorus lift: add a layer, open the filters further, optionally raise the key by 1-2 semitones.
-Sound design: avoid farty synths (buzzy square or pulse waves in the low register through a nearly closed resonant filter, short blatty envelopes, overdriven low notes; they pile up 120-450 Hz). Prefer saw or triangle for low parts, enough cutoff for a few harmonics, moderate resonance, decays long enough to sound like notes, a clean sub under a brighter layer.\nAvoid sameness: no part should loop unchanged for long. Lead lines need a change every 8 bars or so, arps every 12, bass and drums every 16 (techno and ambient can stretch this). Vary by developing the idea (answer phrase, inversion, rhythmic displacement, ghost notes, dropping or adding a part, filter movement), not by random noise.\nArrangement: give each part its own register (bass low, chords mid, lead high) and its own rhythmic space; not everything plays all the time.
+Sound design: avoid farty synths (buzzy square or pulse waves in the low register through a nearly closed resonant filter, short blatty envelopes, overdriven low notes; they pile up 120-450 Hz). Prefer saw or triangle for low parts, enough cutoff for a few harmonics, moderate resonance, decays long enough to sound like notes, a clean sub under a brighter layer.\nAvoid sameness: no part should loop unchanged for long. Lead lines need a change every 8 bars or so, arps every 12, bass and drums every 16 (techno and ambient can stretch this). Vary by developing the idea (answer phrase, inversion, rhythmic displacement, ghost notes, dropping or adding a part, filter movement), not by random noise.\nNever leave high-pitched, repeating sounds on: shrill arps up in the top octaves, whistling or screaming resonance, piercing bells, chirpy chip arps, constant hi-hat sizzle and geiger clicks grate on the ears within a few bars. Use them as brief accents (a fill, a build, one phrase) and then take them out, lower them an octave, darken them or bury them in the mix.\nMixing: the kick and drums are the anchor; the bass sits just under the kick (about 1-2 dB) and stays dry and centred; the lead or hook sits up front, about 3 dB under the drums; arps and counter-melodies tuck 6-8 dB behind the lead; pads, textures and noise sit 10-13 dB down, pushed back with reverb. Only one part owns the front at a time. Re-balance whenever the arrangement changes, because a part that was right in the verse can be too loud in the chorus.\nTwo layers: the rack holds two complete, independent modular systems (Layer A and Layer B). The song can live on one layer for some sections and crossfade to the other for contrast (for example verses on A, choruses on B, a bridge on either), fading one master up as the other fades down on the downbeat. Make the two layers clearly different in sound (voice models, kit, octave, effects) but in the same key and tempo.\nArrangement: give each part its own register (bass low, chords mid, lead high) and its own rhythmic space; not everything plays all the time.
 Notation here: sequencer notes are scale degrees relative to the current chord when the sequencer's Harmony knob is SONG (0 root, 2 third, 4 fifth, 7 octave), so one pattern follows the chord progression.`;
 
   // ======================= SOUND-DESIGN GUARDRAILS =======================
@@ -3120,6 +3192,53 @@ const AI = (() => {
     });
     handLock[h] = go.catch(() => {});
     return go;
+  }
+  // Switch the layer the hands work on (and the view) once both hands have finished what they are doing.
+  // Work queued after this lands on the new layer.
+  A.pendingView = null;
+  const viewTarget = () => A.pendingView ?? E.V;
+  function toLayer(L, why) {
+    if (!E.hasLayer(L) || viewTarget() === L) return Promise.resolve();
+    A.pendingView = L;
+    const go = Promise.all([handLock[0], handLock[1]]).then(() => {
+      if (E.V !== L) { UI.showLayer(L); A.log('sys', `now on <b>${E.layerName(L)}</b>${why ? ' · ' + esc(why) : ''}`); }
+      if (A.pendingView === L) A.pendingView = null;
+    });
+    handLock[0] = handLock[1] = go.catch(() => {});
+    return go;
+  }
+  A.toLayer = toLayer; A.viewTarget = viewTarget;
+  // Give Layer B its own character: same key and tempo, different voices, kit and space (choruses live there)
+  function contrastActs(p) {
+    const acts = [{ do: 'say', text: 'Giving Layer B a contrasting sound: different voice models, kit and space, so the switch to it feels like a lift.' }];
+    const out = id => E.cablesFrom(id, 'OUT').length > 0;
+    for (const id of E.order) {
+      const m = E.mods[id];
+      if (m.kind === 'Analog' && out(id)) {
+        if (m.params.model.choice !== 'ACID') acts.push(K(id, 'model', pick(Mods.MODELS.filter(x => x !== 'ACID' && x !== m.params.model.choice)), 'a different voice model for this layer'));
+        acts.push(K(id, 'cutoff', clamp(m.params.cutoff.n + 0.08 + rnd() * 0.08), 'a little brighter'));
+      }
+      if (m.kind === 'Titan' && out(id)) acts.push(K(id, 'cut', clamp(m.params.cut.n + 0.1), 'open the bass up'));
+      if (m.kind === 'Bodies' && out(id)) acts.push(K(id, 'model', pick(m.params.model.steps.filter(x => x !== m.params.model.choice)), 'a different body'));
+      if (m.kind === 'StepSeq' && E.cablesFrom(id, 'NOTE').length && +m.params.oct.choice >= 3 && +m.params.oct.choice <= 3 && rnd() < 0.5) acts.push(K(id, 'oct', '4', 'lift the line an octave on this layer'));
+    }
+    if (E.mods.drums && routed('drums')) acts.push(K('drums', 'kit', pick(Mods.KITS.filter(k => k !== E.mods.drums.params.kit.choice)), 'a different kit for this layer'), K('drums', 'drive', clamp(E.mods.drums.params.drive.n + 0.1), 'a bit more punch'));
+    if (E.mods.mixer) acts.push(K('mixer', 'verb', clamp(E.mods.mixer.params.verb.n + 0.08), 'a wider space'), K('mixer', 'dtime', pick(['1/8', '3/16', '1/4']), 'a different echo'));
+    if (E.order.length < 24 && rnd() < 0.5) acts.push(...newLayer(p, new Set(CORE_IDS), false));
+    return acts;
+  }
+  // duplicate the finished Layer A into Layer B, then make B its own system
+  async function buildLayerB(p) {
+    A.stateName = 'Building Layer B';
+    const n = Layers.duplicate(0, 1);
+    A.log('sys', `duplicated the whole rack (${n} modules, ${E.layers[1].cables.length} cables) into <b>Layer B</b>, a second independent modular system`);
+    A.think('Building Layer B', 'Layer B is a full copy of the rack. I am giving it a contrasting sound for the choruses; the song will crossfade between the two layers.');
+    await toLayer(1, 'giving Layer B its own sound');
+    await runAll(contrastActs(p));
+    if (A.abort) return;
+    const f = [...Theory.unfart('Layer B: no farty synths'), ...Mix.ungrate('Layer B')]; if (f.length) await runAll(f);
+    if (Mix.on && !A.abort) await Mix.pass({ L: 1, why: 'balance Layer B' });
+    await toLayer(0, 'back to Layer A to start the song');
   }
 
   // ======================= READING THE BRIEF =======================
@@ -3731,6 +3850,8 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       await runAll(acts);
       if (!E.running) await run({ do: 'transport', run: true });
       { const f = Theory.unfart('sound design check: no farty synths'); if (f.length && !A.abort) { A.log('sys', 'checking the sound design: avoiding farty, blatty synth settings'); await runAll(f); } }
+      { const g = Mix.ungrate(); if (g.length && !A.abort) await runAll(g); }
+      if (Mix.on && !A.abort) { A.stateName = 'Mixing'; await Mix.pass({ why: 'balance the new patch' }); }
     } else {
       // tweak: change targets from adjectives
       const t = task;
@@ -3755,7 +3876,10 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     if (A.abort) return finish();
 
     // song structure: plan the form and the first section, then the song engine runs on the bar line
-    if (A.songForm && p.mode !== 'tweak') { A.stateName = 'Arranging the song'; if (!(await Song.begin(p, { loop: p.mode !== 'perform' }))) A.songForm = null; }
+    const twoLayers = A.songForm && p.mode !== 'tweak' && $('#layerson')?.checked;
+    if (twoLayers && !A.abort) await buildLayerB(p);
+    if (A.abort) return finish();
+    if (A.songForm && p.mode !== 'tweak') { A.stateName = 'Arranging the song'; await toLayer(0); if (!(await Song.begin(p, { loop: p.mode !== 'perform', layers: twoLayers }))) A.songForm = null; }
     if (A.abort) return finish();
 
     if (p.mode === 'perform' && A.songForm) {
@@ -3764,6 +3888,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       if (!A.abort) {
         A.stateName = 'Ending the set'; A.think('Ending the set', 'The song is over. Fading out and stopping the clock.');
         Song.stop();
+        if (E.hasLayer(1)) { const other = 1 - E.V; if (E.layers[other].bus.gain.value > 0.01) E.fadeLayer(other, 0, 6); }
         await run(K('mixer', 'master', 0.05, 'fade out', 6000));
         await run({ do: 'transport', run: false });
         await run(K('mixer', 'master', 0.8, 'reset the master for next time', 400));
@@ -3789,6 +3914,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
           continue;
         }
         if (A.fixQueue.length) { await runAll(A.fixQueue.splice(0)); continue; }
+        if (Mix.needs(E.V)) { await Mix.pass({ why: 'the balance drifted' }); continue; }
         await shapeOnce();
         const pause = (2200 + rnd() * 3500) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.4);
         await UI.sleep(pause);
@@ -3803,7 +3929,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     } else {
       A.stateName = 'Listening and tuning';
       const n = p.mode === 'tweak' ? 6 : 5;
-      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
+      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); if (Mix.needs(E.V)) await Mix.pass({ why: 'the balance drifted' }); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
       if (!A.abort) { A.think('Patch ready', A.songForm ? `Done. The ${p.genre} song keeps playing and I keep writing each next section while it loops. Ask for changes, or run a live set.` : `Done. The ${p.genre} patch keeps playing. Ask for changes like "make it darker" or "add the geiger counter", or run a live set.`); A.log('sys', 'patch ready'); }
     }
     finish();
@@ -3844,9 +3970,13 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
 const Song = (() => {
   const E = Engine, T = Theory, $ = s => document.querySelector(s), clamp = DSP.clamp, rnd = Math.random, pick = T.pick;
   const L8 = 'ABCDEFGH';
-  const S = { on: false, form: null, sections: [], cur: -1, startBar: null, bar: -1, total: 0, loop: false, done: false, parts: {}, hook: null, verse: null, progs: {}, lift: 0, base: null, planning: -1, autos: [], fresh: {}, p: null, ready: false };
+  const S = { on: false, form: null, sections: [], cur: -1, startBar: null, bar: -1, total: 0, loop: false, done: false, partsBy: [{}, {}], two: false, live: 0, hook: null, verse: null, progs: {}, lift: 0, base: null, planning: -1, autos: [], fresh: {}, p: null, ready: false };
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const log = (h) => AI.log('song', h);
+  // each layer has its own parts (which sequencer plays bass, lead, arp); S.parts means the layer in context
+  Object.defineProperty(S, 'parts', { get: () => S.partsBy[E.L], set: v => { S.partsBy[E.L] = v; }, enumerable: true });
+  // with two layers, choruses (and sometimes the bridge) live on Layer B, everything else on Layer A
+  const layerFor = role => !S.two ? 0 : ['chorus', 'drop', 'post'].includes(role) ? 1 : ['bridge', 'break'].includes(role) ? (rnd() < 0.5 ? 1 : 0) : 0;
   const DRUM_SLOT = { intro: 0, verse: 1, pre: 2, build: 2, chorus: 3, drop: 3, post: 4, bridge: 4, break: 4, outro: 5 }, ROLL = 6, FILL = 7, PULL = 7;
   // how many bars each kind of part may loop unchanged before it starts to grate
   const PATIENCE = { lead: 8, arp: 12, bass: 16, drums: 16, texture: 24 };
@@ -3884,7 +4014,7 @@ const Song = (() => {
       const b = Math.max(4, Math.round(bars * k / 4) * 4);
       const R = T.ROLES[role], fin = tag === 'final';
       const name = role === 'pre' ? 'Pre-chorus' : role === 'post' ? 'Post-chorus' : (fin ? 'Final ' : '') + role[0].toUpperCase() + role.slice(1);
-      out.push({ i, role, name, bars: b, start: bar, final: fin, energy: fin ? T.FINAL.energy : R.energy, slot: fin ? T.FINAL.slot : R.slot, dslot: DRUM_SLOT[role] ?? 1, why: fin ? T.FINAL.why : R.why, planned: false, written: false });
+      out.push({ i, role, name, bars: b, start: bar, final: fin, layer: layerFor(role), energy: fin ? T.FINAL.energy : R.energy, slot: fin ? T.FINAL.slot : R.slot, dslot: DRUM_SLOT[role] ?? 1, why: fin ? T.FINAL.why : R.why, planned: false, written: false });
       bar += b;
     });
     // number repeated sections: Verse 2, Chorus 2
@@ -3893,7 +4023,8 @@ const Song = (() => {
   }
 
   // ======================= PLANNING (data) =======================
-  function planData(s) {
+  function planData(s) { return E.within(s.layer || 0, () => planData0(s)); }
+  function planData0(s) {
     const scale = E.mods.seq1?.params.scale.choice || 'MINOR', role = s.role;
     const prev = S.progs[role];
     // repeated sections keep their harmony (that is what makes them recognisable); verse 2 sometimes varies it
@@ -3925,7 +4056,8 @@ const Song = (() => {
     return acts;
   }
   // instant write (when the hand did not get there in time)
-  function writeNow(s) {
+  function writeNow(s) { return E.within(s.layer || 0, () => writeNow0(s)); }
+  function writeNow0(s) {
     for (const [id, line] of Object.entries(s.parts)) { const m = E.mods[id]; if (!m) continue; m.pats[s.slot] = Array.from({ length: 16 }, (_, i) => ({ n: line.notes[i] ?? 0, g: line.notes[i] == null ? 0 : 1, a: (line.accents || []).includes(i) ? 1 : 0, s: (line.slides || []).includes(i) ? 1 : 0, p: line.probs?.[i] ?? 1, r: line.ratchets?.[i] ?? 1 })); m.ui?.renderAll(); }
     const d = E.mods.drums; if (d) { d.pats[s.dslot] = d.INST.map(ins => String(s.drums[ins] || '').padEnd(16, '.').slice(0, 16).split('').map(c => c === 'X' ? 2 : c === 'x' ? 1 : 0)); d.ui?.renderGrid(); }
     s.written = true;
@@ -3935,9 +4067,10 @@ const Song = (() => {
   // optional: Claude writes the next section while this one plays
   async function claudeSection(s) {
     if ($('#brain')?.value !== 'claude' || !AI.claude) return false;
-    const scale = E.mods.seq1?.params.scale.choice, root = E.mods.seq1?.params.root.choice;
-    const partsTxt = Object.entries(S.parts).map(([id, part]) => { const m = E.mods[id]; return `${id} (${part}, drives ${E.cablesFrom(id, 'NOTE').map(c => c.to.mod).join('+')}, octave ${m.params.oct.choice})`; }).join('; ');
-    const prevTxt = S.sections.filter(x => x.planned && x !== s).slice(-3).map(x => `${x.name}: chords ${x.prog?.join(',')}; ` + Object.entries(x.parts || {}).map(([id, l]) => `${id} ${l.notes.map(v => v == null ? '.' : v).join(' ')}`).join(' | ')).join('\n');
+    const L = s.layer || 0;
+    const { scale, root, partsTxt, prevTxt } = E.within(L, () => ({ scale: E.mods.seq1?.params.scale.choice, root: E.mods.seq1?.params.root.choice,
+      partsTxt: Object.entries(S.parts).map(([id, part]) => { const m = E.mods[id]; return `${id} (${part}, drives ${E.cablesFrom(id, 'NOTE').map(c => c.to.mod).join('+')}, octave ${m.params.oct.choice})`; }).join('; '),
+      prevTxt: S.sections.filter(x => x.planned && x !== s).slice(-3).map(x => `${x.name}: chords ${x.prog?.join(',')}; ` + Object.entries(x.parts || {}).map(([id, l]) => `${id} ${l.notes.map(v => v == null ? '.' : v).join(' ')}`).join(' | ')).join('\n') }));
     const prompt = `${T.PRIMER}
 
 You are writing the next section of a song that is playing live on a modular synth. Key: ${root} ${scale}. Genre: ${S.p?.genre}. Personality: ${S.p?.persona}.
@@ -3951,6 +4084,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     try {
       const r = await AI.claude.json(prompt, { modelTier: 'default' });
       if (!r || !Array.isArray(r.progression) || !r.parts) return false;
+      return E.within(L, () => {
       const okLine = l => Array.isArray(l?.notes) && l.notes.length >= 8;
       s.prog = r.progression.map(x => clamp(Math.round(+x) || 0, 0, 6)).slice(0, 8); s.hr = [1, 2, 4].includes(+r.barsPerChord) ? +r.barsPerChord : s.hr;
       s.chords = s.prog.map(d => T.chordName(scale, d)).join(' – '); s.cadence = 'Claude\'s choice';
@@ -3959,6 +4093,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       if ((s.role === 'chorus' || s.role === 'drop') && !S.hook) { const lead = Object.keys(S.parts).find(id => S.parts[id] === 'lead'); if (lead) S.hook = s.parts[lead].notes; }
       log(`Claude wrote ${esc(s.name)}: ${esc(r.idea || '')}`);
       return true;
+      });
     } catch (e) { log(`Claude could not plan ${esc(s.name)} (${esc(e.code || e.message)}), using the built-in theory`); return false; }
   }
   async function planAhead(i) {
@@ -3968,8 +4103,12 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     await claudeSection(s);
     // a section reusing the bank that is playing right now cannot be written ahead: it repeats the live patterns
     const live = S.sections[S.cur];
-    if (live && live.slot === s.slot && live.dslot === s.dslot) { s.written = true; s.parts = live.parts; s.drums = live.drums; S.planning = -1; render(); return; }
-    if (S.on) await AI.runAll(writeActs(s, true), 1); // the second hand plans ahead while the first tweaks
+    if (live && (live.layer || 0) === (s.layer || 0) && live.slot === s.slot && live.dslot === s.dslot) { s.written = true; s.parts = live.parts; s.drums = live.drums; S.planning = -1; render(); return; }
+    if (S.on) {
+      // the second hand plans ahead while the first tweaks; a section on the layer that is off screen is written directly
+      if ((s.layer || 0) === AI.viewTarget()) await AI.runAll(writeActs(s, true), 1);
+      else { writeNow(s); log(`${esc(s.name)} written into ${E.layerName(s.layer)}, waiting silently for its crossfade`); }
+    }
     if (!s.written) s.written = S.sections[i] === s;
     S.planning = -1; render();
   }
@@ -3977,6 +4116,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   // ======================= THE BAR CLOCK =======================
   // fired while scheduling the downbeat of bar `bar`; everything queued here lands on the next bar line
   function onBar(ev) {
+    if (E.L !== 0) return; // both layers' clocks tick together: Layer A's bar drives the song
     if (!S.on || !E.running) return;
     if (S.startBar == null) return;
     const songBar = ev.bar - S.startBar; S.bar = songBar;
@@ -3986,10 +4126,22 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     const idx = S.sections.findIndex(s => s.start === nextBar);
     if (idx >= 0) enter(idx, tNext, (ev.bar + 1) * 16);
     else inside(nextBar, tNext);
-    freshness(songBar);
+    E.within(S.live, () => freshness(songBar));
   }
   E.on('bar', onBar);
   function enter(i, t, step) {
+    const s = S.sections[i], L = s.layer || 0, prev = S.live;
+    E.within(L, () => enter0(i, t, step));
+    if (L !== prev) crossTo(L, prev, t, s);
+  }
+  // crossfade the layers' masters across the downbeat: the new layer rises over the last beat, the old one falls after
+  function crossTo(L, prev, t, s) {
+    const beat = 4 * E.sixteenth();
+    E.fadeLayer(L, 1, beat, t - beat); E.fadeLayer(prev, 0, beat * 2, t);
+    S.live = L;
+    E.at(t, () => log(`crossfade: ${E.layerName(prev)} fades down, ${E.layerName(L)} fades up for ${esc(s.name)}`));
+  }
+  function enter0(i, t, step) {
     const s = S.sections[i];
     if (!s.planned) planData(s);
     if (!s.written) writeNow(s);
@@ -4002,6 +4154,8 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     if (s.final && !S.lift && rnd() < 0.5) lift(t);
     E.at(t, () => {
       S.cur = i; render();
+      if (UI.followMode !== 'off' && (s.layer || 0) !== AI.viewTarget()) AI.toLayer(s.layer || 0, `${s.name} lives on ${E.layerName(s.layer || 0)}`);
+      Mix.wantSoon(s.layer || 0, 2 * 16 * E.sixteenth() * 1000); // rebalance once the new section has settled
       log(`<b>${esc(s.name)}</b> · ${esc(s.chords)} · energy ${Math.round(s.energy * 100)}%`);
       AI.think(`Song · ${s.name}`, `${s.name}: ${s.chords}. ${s.why}.`);
       Object.keys(S.fresh).forEach(k => { S.fresh[k] = 0; });
@@ -4012,6 +4166,15 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   // inside a section: fills on phrase ends, the build's roll and pull, small push-pull waves
   function inside(nextBar, t) {
     const s = S.sections.find(x => nextBar >= x.start && nextBar < x.start + x.bars); if (!s) return;
+    const nx = S.sections[S.sections.indexOf(s) + 1], k = nextBar - s.start, barS = 16 * E.sixteenth();
+    if (nx && (nx.layer || 0) !== (s.layer || 0) && (s.role === 'build' || s.role === 'pre')) {
+      // push-pull across layers: the next layer creeps in under the build, then drops out for the pull bar
+      if (k === Math.floor(s.bars / 2)) { E.fadeLayer(nx.layer || 0, 0.22, (s.bars - k - 1) * barS, t); E.at(t, () => log(`${E.layerName(nx.layer || 0)} creeps in under the build`)); }
+      if (s.bars - k === 1) E.fadeLayer(nx.layer || 0, 0, barS * 0.25, t);
+    }
+    E.within(s.layer || 0, () => inside0(s, nextBar, t));
+  }
+  function inside0(s, nextBar, t) {
     const k = nextBar - s.start, left = s.bars - k, d = E.mods.drums;
     const isBuild = s.role === 'build' || s.role === 'pre';
     if (isBuild && d) {
@@ -4056,7 +4219,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   function lift(t) {
     S.lift = pick([1, 2]);
     setTimeout(() => {
-      for (const id of [...Object.keys(S.parts), 'ent', 'marbles']) { const p = E.mods[id]?.params.root; if (p) p.setNorm(p.normOf(DSP.NOTE_NAMES[(p.value + S.lift) % 12])); }
+      for (const L of [0, 1]) E.within(L, () => { for (const id of [...Object.keys(S.parts), 'ent', 'marbles']) { const p = E.mods[id]?.params.root; if (p) p.setNorm(p.normOf(DSP.NOTE_NAMES[(p.value + S.lift) % 12])); } });
       log(`key lift: up ${S.lift} semitone${S.lift > 1 ? 's' : ''} for the final chorus`);
     }, Math.max(0, (t - E.ctx.currentTime - 0.18) * 1000));
   }
@@ -4090,6 +4253,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       const v = AI.variation(m.pats[m.cur].map(x => x.g ? x.n : null), pick(['B', 'B', 'C']));
       acts = [{ do: 'steps', mod: id, notes: v.notes, ratchets: v.ratchets, accents: m.pats[m.cur].map((x, i) => x.a ? i : -1).filter(i => i >= 0), why: `${kind} looped ${bars} bars unchanged, getting same-y: ${v.why}` }];
     }
+    if (E.L !== AI.viewTarget()) return; // that layer is off screen: let the hand do it once it is back
     if (AI.busy && !S.on) AI.fixQueue.push(...acts); else AI.runAll(acts, 1);
   }
 
@@ -4098,9 +4262,10 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     stop();
     const form = choice(p); if (!form) return false;
     S.p = p; S.form = form; S.loop = !!o.loop; S.done = false; S.cur = -1; S.hook = null; S.verse = null; S.progs = {}; S.lift = 0; S.fresh = {}; S.autos = [];
-    S.parts = assignParts();
-    if (!Object.keys(S.parts).length) { log('no sequencer is playing a voice, so there is no song to arrange'); return false; }
-    S.base = drumBase();
+    S.partsBy = [E.within(0, assignParts), E.hasLayer(1) ? E.within(1, assignParts) : {}];
+    if (!Object.keys(S.partsBy[0]).length) { log('no sequencer is playing a voice, so there is no song to arrange'); return false; }
+    S.two = !!o.layers && Object.keys(S.partsBy[1]).length > 0; S.live = 0;
+    S.base = E.within(0, drumBase);
     const L = layout(form, p); S.sections = L.sections; S.total = L.total;
     AI.blocked = new Set(['switch pattern', 'write variation', 'transpose', 'add layer', 'layer in', 'layer out', 'drop kick', 'bring kick']);
     // every part follows the song's chords and switches on the bar line; song chains are off (the song engine drives)
@@ -4109,6 +4274,13 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     E.mods.drums?.setSong(null, false);
     // pull pattern slot for every part (silent bass, sparse others)
     for (const id of Object.keys(S.parts)) { const m = E.mods[id]; m.pats[7] = m.pats[7].map(x => ({ ...x, g: 0 })); }
+    // Layer B gets the same set-up directly (it is off screen and silent until its first crossfade)
+    if (S.two) E.within(1, () => {
+      for (const id of Object.keys(S.parts)) { const m = E.mods[id]; m.setSong(null, false); m.params.follow.setNorm(m.params.follow.normOf('SONG')); m.params.len.setNorm(m.params.len.normOf('16') ?? 1); m.params.trans.setNorm(m.params.trans.normOf('0') ?? m.params.trans.n); m.pats[7] = m.pats[7].map(x => ({ ...x, g: 0 })); }
+      E.mods.drums?.setSong(null, false);
+    });
+    E.fadeLayer(0, 1, 0.3); if (E.hasLayer(1)) E.fadeLayer(1, 0, 0.3);
+    if (S.two) acts.push({ do: 'say', text: `Two layers: ${S.sections.filter(s => s.layer).map(s => s.name).join(', ')} live on Layer B; the rest on Layer A. The masters crossfade on the downbeats.` });
     S.on = true; render();
     await AI.runAll(acts);
     planData(S.sections[0]); await claudeSection(S.sections[0]);
@@ -4123,6 +4295,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   async function performLoop(p) {
     while (!AI.abort && S.on && !S.done) {
       if (AI.fixQueue.length) { await AI.runAll(AI.fixQueue.splice(0)); continue; }
+      if (Mix.needs(AI.viewTarget())) { await AI.toLayer(S.live); await Mix.pass({ L: E.V, why: 'new section, new balance' }); continue; }
       await AI.shapeOnce();
       await UI.sleep((2600 + rnd() * 3200) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.35));
     }
@@ -4137,7 +4310,8 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     S.sections.forEach((s, i) => {
       const d = document.createElement('div'); d.className = 'sec songsec' + (i === S.cur ? ' now' : '') + (S.planning === i ? ' planning' : '') + (s.written && i !== S.cur ? ' ready' : '');
       d.style.flex = s.bars; d.title = `${s.name}: ${s.bars} bars${s.chords ? ' · ' + s.chords : ''}${s.cadence ? ' · ' + s.cadence : ''}. ${s.why}`;
-      d.innerHTML = `<span>${esc(s.name.replace('Final ', 'Fin. '))}</span><i style="height:${Math.round(s.energy * 100)}%"></i>`;
+      d.innerHTML = `<span>${esc(s.name.replace('Final ', 'Fin. '))}${S.two ? `<b class="ly">${'AB'[s.layer || 0]}</b>` : ''}</span><i style="height:${Math.round(s.energy * 100)}%"></i>`;
+      if (S.two && s.layer) d.classList.add('lyb');
       el.append(d);
     });
     const hd = document.createElement('div'); hd.className = 'head'; hd.id = 'songhead'; el.append(hd);
@@ -4172,7 +4346,7 @@ const Critic = (() => {
 
   // ======================= RECORD =======================
   function record(sec = 6) {
-    const ctx = E.ctx, an = E.mods.monitor.analyser, n = Math.floor(ctx.sampleRate * sec);
+    const ctx = E.ctx, an = E.outAn, n = Math.floor(ctx.sampleRate * sec);
     const buf = new Float32Array(n); let w = 0;
     const sp = ctx.createScriptProcessor(4096, 1, 1), mute = ctx.createGain(); mute.gain.value = 0;
     an.connect(sp); sp.connect(mute); mute.connect(ctx.destination);
@@ -4339,6 +4513,9 @@ Notes: lowMid is the share of energy between 120 and 450 Hz; above 0.5 with a lo
 SEQUENCERS (notes are scale degrees, . = rest):
 ${seqLines}
 CABLES: ${cables}
+PER-CHANNEL BALANCE (loudness-weighted, against where each kind of part should sit: drums anchor, bass just under, lead up front, arps behind, textures buried):
+${typeof Mix !== 'undefined' ? Mix.describe() : 'n/a'}
+Also judge the mix (parts too loud or too quiet: fix with mixer lN knobs) and any high-pitched, repeating sound left on too long (darken it, lower its octave or take it out).
 RECENT AI ACTIONS:
 ${recent || 'none'}
 
@@ -4422,7 +4599,10 @@ const TL = (() => {
   const snapT = t => T.snap ? Math.round(t / (beatLen() / 4)) * (beatLen() / 4) : t;
   const srcNow = () => (AI.busy && performance.now() - (T.userTouch || 0) > 400) ? 'ai' : 'you';
   const sortEv = () => T.events.sort((a, b) => a.t - b.t);
-  const modName = id => E.mods[id]?.name || id;
+  // events on Layer B carry module keys like "B:seq1"; Layer A keys are plain ids
+  const LP = 'B:', keyOf = (L, id) => L ? LP + id : id, parseKey = k => typeof k === 'string' && k.startsWith(LP) ? [1, k.slice(LP.length)] : [0, k];
+  const mm = k => { const [L, id] = parseKey(k); return E.layers[L].mods[id]; };
+  const modName = k => { const [L, id] = parseKey(k); return (E.layers[L].mods[id]?.name || id) + (L ? ' (B)' : ''); };
 
   // ======================= TAPE: the rack module the audio clips play through =======================
   function Tape(id) {
@@ -4441,7 +4621,8 @@ const TL = (() => {
     const upd = () => { lcd.textContent = `${T.clips.length} clip${T.clips.length === 1 ? '' : 's'} · ${T.playing ? (T.recording ? 'REC ' : 'PLAY ') : 'STOP '}${fmtT(T.pos)}`; reels.classList.toggle('spin', T.playing); };
     UI.anim(upd);
   };
-  function ensureTape() {
+  function ensureTape() { return E.within(0, ensureTape0); } // the tape lives on Layer A
+  function ensureTape0() {
     if (E.mods.tape) return 'tape';
     const id = UI.createModule('Tape', { id: 'tape' });
     // plug it into a free mixer channel, or straight into the monitor
@@ -4456,34 +4637,35 @@ const TL = (() => {
   P.setNorm = function (n, silent) { const b = this.n; origSet.call(this, n, silent); if (this.n !== b) E.fire('param', this); };
   const lastPt = {};
   E.on('param', p => {
-    if (!T.recording || T.applying || !p.mod || !E.mods[p.mod.id]) return;
-    const t = T.pos, k = p.mod.id + '.' + p.key, src = srcNow(), last = lastPt[k];
+    if (!T.recording || T.applying || !p.mod || mm(keyOf(p.mod.layer, p.mod.id)) !== p.mod) return;
+    const mk = keyOf(p.mod.layer, p.mod.id), t = T.pos, k = mk + '.' + p.key, src = srcNow(), last = lastPt[k];
     if (last && T.events.includes(last) && t - last.t < 0.04 && last.t <= t) { last.n = p.n; return; }
-    const ev = { id: uid(), t, kind: 'param', mod: p.mod.id, key: p.key, n: p.n, ramp: false, src };
+    const ev = { id: uid(), t, kind: 'param', mod: mk, key: p.key, n: p.n, ramp: false, src };
     T.events.push(ev); lastPt[k] = ev; dirty();
   });
   E.on('change', ev => {
     if (!T.recording || T.applying) return;
     const c = ev.cable;
-    T.events.push({ id: uid(), t: T.pos, kind: 'cable', op: ev.type, mod: c.to.mod, from: { ...c.from }, to: { ...c.to }, src: ev.ai ? 'ai' : srcNow() });
+    T.events.push({ id: uid(), t: T.pos, kind: 'cable', op: ev.type, mod: keyOf(E.L, c.to.mod), from: { ...c.from }, to: { ...c.to }, src: ev.ai ? 'ai' : srcNow() });
     dirty();
   });
   const optsOf = m => ({ name: m.name.replace(/ \d+$/, ''), stripe: m.stripe, model: m.params.model?.choice });
   E.on('modules', ev => {
     if (!T.recording || T.applying) return;
-    if (ev.type === 'add') { const m = E.mods[ev.id]; T.events.push({ id: uid(), t: T.pos, kind: 'module', op: 'add', mod: ev.id, type: m.kind, opts: optsOf(m), src: srcNow() }); }
-    else T.events.push({ id: uid(), t: T.pos, kind: 'module', op: 'remove', mod: ev.id, src: srcNow() });
+    if (ev.type === 'add') { const m = E.mods[ev.id]; T.events.push({ id: uid(), t: T.pos, kind: 'module', op: 'add', mod: keyOf(E.L, ev.id), type: m.kind, opts: optsOf(m), src: srcNow() }); }
+    else T.events.push({ id: uid(), t: T.pos, kind: 'module', op: 'remove', mod: keyOf(E.L, ev.id), src: srcNow() });
     dirty();
   });
+  E.on('layerfade', f => { if (T.recording && !T.applying) { T.events.push({ id: uid(), t: T.pos, kind: 'layerfade', L: f.L, to: f.to, sec: f.sec, src: srcNow() }); dirty(); } });
   E.on('transport', r => { if (T.recording && !T.applying) { T.events.push({ id: uid(), t: T.pos, kind: 'transport', run: r, src: srcNow() }); dirty(); } });
   // patterns, drum grids and song chains: compare snapshots a few times a second
   const dataOf = m => m.kind === 'StepSeq' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn } : m.kind === 'Drums' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn, mute: m.mute } : null;
   const lastData = {}, lastDataEv = {};
   setInterval(() => {
     if (!T.recording) return;
-    for (const id of E.order) {
-      const d = dataOf(E.mods[id]); if (!d) continue;
-      const s = JSON.stringify(d);
+    for (const Ly of E.layers) for (const mid of Ly.order) {
+      const d = dataOf(Ly.mods[mid]); if (!d) continue;
+      const s = JSON.stringify(d), id = keyOf(Ly.i, mid);
       if (lastData[id] !== s) { const first = lastData[id] == null; lastData[id] = s; if (!first && !T.applying) { const prev = lastDataEv[id]; if (prev && T.events.includes(prev) && T.pos - prev.t < 1.2) prev.data = JSON.parse(s); else { lastDataEv[id] = { id: uid(), t: T.pos, kind: 'data', mod: id, data: JSON.parse(s), src: srcNow() }; T.events.push(lastDataEv[id]); } dirty(); } }
     }
   }, 180);
@@ -4496,6 +4678,9 @@ const TL = (() => {
   // ======================= SNAPSHOT / RESTORE =======================
   const FIXED = new Set(['clock', 'mixer', 'monitor']);
   function snapshot() {
+    return Object.assign(E.within(0, snapshotA), { layerB: E.hasLayer(1) ? Layers.snapshot(1) : null, buses: E.layers.map(Ly => Ly.bus.gain.value) });
+  }
+  function snapshotA() {
     return {
       modules: E.order.map(id => ({ id, type: E.mods[id].kind, opts: optsOf(E.mods[id]) })),
       params: Object.fromEntries(E.order.map(id => [id, Object.fromEntries(E.mods[id].paramOrder.map(k => [k, E.mods[id].params[k].n]))])),
@@ -4509,10 +4694,18 @@ const TL = (() => {
     const c = JSON.parse(JSON.stringify(d));
     if (m.kind === 'StepSeq') { m.pats = c.pats; m.cur = c.cur; m.song = c.song; m.songOn = c.songOn; m.next = null; m.ui?.renderAll(); }
     if (m.kind === 'Drums') { if (c.pats) { m.pats = c.pats; m.cur = c.cur ?? 0; m.song = c.song || m.song; m.songOn = !!c.songOn; } else if (c.pat) m.pat = c.pat; m.mute = c.mute; m.ui?.renderGrid(); }
-    lastData[id] = JSON.stringify(dataOf(m));
+    lastData[keyOf(E.L, id)] = JSON.stringify(dataOf(m));
   }
   function addMod(id, type, opts = {}) { if (E.mods[id] || !Mods.TYPES[type]) return; UI.createModule(type, { id, ...opts }); }
   function restore(s) {
+    E.within(0, () => restoreA(s));
+    T.applying = true;
+    try {
+      if (s.layerB) { Layers.clear(1); Layers.load(1, s.layerB); }
+      if (s.buses) s.buses.forEach((g, L) => E.fadeLayer(L, g, 0.05));
+    } finally { T.applying = false; }
+  }
+  function restoreA(s) {
     T.applying = true;
     try {
       const want = new Set(s.modules.map(m => m.id));
@@ -4531,14 +4724,19 @@ const TL = (() => {
   // ======================= PLAYBACK =======================
   const glowKnob = (id, key) => { const el = UI.knobs[id + '.' + key]; if (!el) return; el.classList.add('ai'); clearTimeout(el._tlg); el._tlg = setTimeout(() => el.classList.remove('ai'), 600); };
   function applyEvent(ev) {
+    const [L, mid] = parseKey(ev.mod);
+    return E.within(ev.mod ? L : E.L, () => applyEvent0(ev, mid));
+  }
+  function applyEvent0(ev, mid) {
     T.applying = true;
     try {
-      if (ev.kind === 'param') { const p = E.mods[ev.mod]?.params[ev.key]; if (p) { p.setNorm(ev.n); glowKnob(ev.mod, ev.key); } }
+      if (ev.kind === 'param') { const p = E.mods[mid]?.params[ev.key]; if (p) { p.setNorm(ev.n); glowKnob(mid, ev.key); } }
       else if (ev.kind === 'cable') {
         if (ev.op === 'connect') { if (E.mods[ev.from.mod] && E.mods[ev.to.mod]) E.connect(ev.from, ev.to, { ai: true }); }
         else { const c = E.findCable(ev.to.mod, ev.to.port); if (c) E.disconnect(c, { ai: true }); }
-      } else if (ev.kind === 'module') { if (ev.op === 'add') addMod(ev.mod, ev.type, ev.opts); else if (!FIXED.has(ev.mod)) UI.removeModule(ev.mod); }
-      else if (ev.kind === 'data') setData(ev.mod, ev.data);
+      } else if (ev.kind === 'module') { if (ev.op === 'add') addMod(mid, ev.type, ev.opts); else if (!FIXED.has(mid)) UI.removeModule(mid); }
+      else if (ev.kind === 'data') setData(mid, ev.data);
+      else if (ev.kind === 'layerfade') E.fadeLayer(ev.L, ev.to, ev.sec || 0.05);
       else if (ev.kind === 'transport') { ev.run ? E.start() : E.stop(); }
       else if (ev.kind === 'marker') { AI.think('Timeline', ev.text); }
     } catch (e) { console.error(e); } finally { T.applying = false; }
@@ -4556,7 +4754,7 @@ const TL = (() => {
   function scheduleClips() {
     playSrcs.forEach(s => { try { s.stop(); } catch (e) { /* done */ } }); playSrcs = [];
     if (!T.playing || !T.clips.length) return;
-    const tape = E.mods.tape; if (!tape) return;
+    const tape = E.layers[0].mods.tape; if (!tape) return;
     const now = ctx.currentTime + 0.03;
     for (const c of T.clips) {
       const buf = T.bufs.get(c.buf)?.buffer; if (!buf || c.track >= 4) continue;
@@ -4590,9 +4788,9 @@ const TL = (() => {
     T.applying = true;
     try {
       for (const [mod, key] of lanesInUse()) {
-        const p = E.mods[mod]?.params[key]; if (!p) continue;
+        const p = mm(mod)?.params[key]; if (!p) continue;
         const v = valueAt(lanePoints(mod, key), t); if (v == null || Math.abs(v - p.n) < 0.0015) continue;
-        p.setNorm(v); if (glow) glowKnob(mod, key);
+        p.setNorm(v); if (glow) { const [L, mid] = parseKey(mod); E.within(L, () => glowKnob(mid, key)); }
       }
     } finally { T.applying = false; }
   }
@@ -4631,7 +4829,7 @@ const TL = (() => {
     if (T.recording) { T.recording = false; renderBar(); return; }
     if (ctx.state !== 'running') ctx.resume();
     if (!T.events.length && !T.snapshot) { T.snapshot = snapshot(); T.pos = 0; }
-    for (const id of E.order) { const d = dataOf(E.mods[id]); if (d) lastData[id] = JSON.stringify(d); }
+    for (const Ly of E.layers) for (const id of Ly.order) { const d = dataOf(Ly.mods[id]); if (d) lastData[keyOf(Ly.i, id)] = JSON.stringify(d); }
     T.recording = true; T.overdubPlay = true;
     if (!T.playing) { T.playing = true; T.startPos = T.pos; T.startCtx = ctx.currentTime; scheduleClips(); }
     if (!E.running) E.start();
@@ -4641,23 +4839,24 @@ const TL = (() => {
   // ======================= LANES =======================
   function lanes() {
     const out = [{ type: 'marker', label: 'Markers', color: C.marker }];
-    if (T.events.some(e => e.kind === 'transport')) out.push({ type: 'global', label: 'Transport', color: '#e9e6dc' });
+    if (T.events.some(e => e.kind === 'transport' || e.kind === 'layerfade')) out.push({ type: 'global', label: 'Transport', color: '#e9e6dc' });
     const ids = []; for (const e of T.events) if (e.mod && !ids.includes(e.mod)) ids.push(e.mod);
-    ids.sort((a, b) => (E.order.indexOf(a) + 1 || 999) - (E.order.indexOf(b) + 1 || 999));
+    const ord = k => { const [L, id] = parseKey(k); return L * 1000 + (E.layers[L].order.indexOf(id) + 1 || 999); };
+    ids.sort((a, b) => ord(a) - ord(b));
     for (const id of ids) {
-      const color = E.mods[id]?.stripe || '#888';
+      const color = mm(id)?.stripe || '#888';
       const keys = []; for (const e of T.events) if (e.kind === 'param' && e.mod === id && !keys.includes(e.key)) keys.push(e.key);
       if (!T.seen.has(id) && keys.length > 3) { T.seen.add(id); T.fold.add(id); } // busy modules start folded
       const folded = T.fold.has(id);
       out.push({ type: 'events', mod: id, label: `${folded ? '▸' : '▾'} ${modName(id)}${folded && keys.length ? ` (${keys.length} lanes)` : ''}`, color, head: true });
-      if (!folded) for (const k of keys) out.push({ type: 'param', mod: id, key: k, label: `${modName(id)} · ${E.mods[id]?.params[k]?.label || k}`, color });
+      if (!folded) for (const k of keys) out.push({ type: 'param', mod: id, key: k, label: `${modName(id)} · ${mm(id)?.params[k]?.label || k}`, color });
     }
     for (let i = 0; i < T.tracks; i++) out.push({ type: 'audio', track: i, label: `Audio ${i + 1}`, color: '#e8453c' });
     let y = 0; for (const l of out) { l.y = y; l.h = LANE_H[l.type]; y += l.h; }
     return out;
   }
-  const evLabel = e => e.kind === 'cable' ? `${e.op === 'connect' ? '⌁' : '✕'} ${e.from.mod}.${e.from.port}→${e.to.port}` : e.kind === 'module' ? (e.op === 'add' ? '＋ add ' + (e.type || '') : '－ remove') : e.kind === 'data' ? '▦ pattern' : e.kind === 'transport' ? (e.run ? '▶ run' : '■ stop') : e.text || '';
-  const laneOf = (e, L) => L.find(l => e.kind === 'param' ? (l.type === 'param' && l.mod === e.mod && l.key === e.key) : e.kind === 'marker' ? l.type === 'marker' : e.kind === 'transport' ? l.type === 'global' : (l.type === 'events' && l.mod === e.mod));
+  const evLabel = e => e.kind === 'cable' ? `${e.op === 'connect' ? '⌁' : '✕'} ${e.from.mod}.${e.from.port}→${e.to.port}` : e.kind === 'module' ? (e.op === 'add' ? '＋ add ' + (e.type || '') : '－ remove') : e.kind === 'data' ? '▦ pattern' : e.kind === 'transport' ? (e.run ? '▶ run' : '■ stop') : e.kind === 'layerfade' ? `◐ ${E.layerName(e.L)} → ${Math.round(e.to * 100)}%` : e.text || '';
+  const laneOf = (e, L) => L.find(l => e.kind === 'param' ? (l.type === 'param' && l.mod === e.mod && l.key === e.key) : e.kind === 'marker' ? l.type === 'marker' : (e.kind === 'transport' || e.kind === 'layerfade') ? l.type === 'global' : (l.type === 'events' && l.mod === e.mod));
 
   // ======================= DOM =======================
   const root = $('#tl');
@@ -4806,14 +5005,14 @@ const TL = (() => {
   function selected() { if (T.sel.size !== 1) return null; const id = [...T.sel][0]; return T.events.find(e => e.id === id) || T.clips.find(c => c.id === id); }
   function renderInsp() {
     const s = selected(), sig = s ? s.id + ':' + T.sel.size : 'n' + T.sel.size;
-    if (sig === inspSig && !T.inspDirty) { if (s) { const tf = insp.querySelector('.it'); if (tf && document.activeElement !== tf) tf.value = (s.t ?? s.start).toFixed(2); const vv = insp.querySelector('.iv b'); if (vv && s.kind === 'param') vv.textContent = E.mods[s.mod]?.params[s.key] ? fmtParam(s) : ''; } return; }
+    if (sig === inspSig && !T.inspDirty) { if (s) { const tf = insp.querySelector('.it'); if (tf && document.activeElement !== tf) tf.value = (s.t ?? s.start).toFixed(2); const vv = insp.querySelector('.iv b'); if (vv && s.kind === 'param') vv.textContent = mm(s.mod)?.params[s.key] ? fmtParam(s) : ''; } return; }
     inspSig = sig; T.inspDirty = false; insp.innerHTML = '';
     if (!s) { insp.textContent = T.sel.size ? `${T.sel.size} selected · Delete removes · drag to move` : 'Click an item to edit it · double-click a lane to add a point'; return; }
     const time = h('input', 'it'); time.type = 'number'; time.step = '0.01'; time.min = '0'; time.title = 'Time in seconds'; time.value = (s.t ?? s.start).toFixed(2);
     time.onchange = () => { const v = Math.max(0, +time.value || 0); if (s.kind) s.t = v; else s.start = v; dirty(); if (T.playing) scheduleClips(); };
     const lab = h('span', 'il');
     if (s.kind === 'param') {
-      lab.textContent = `${modName(s.mod)} ${E.mods[s.mod]?.params[s.key]?.label || s.key}`;
+      lab.textContent = `${modName(s.mod)} ${mm(s.mod)?.params[s.key]?.label || s.key}`;
       const r = h('input'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.001; r.value = s.n; r.oninput = () => { s.n = +r.value; dirty(); vv.querySelector('b').textContent = fmtParam(s); };
       const vv = h('span', 'iv', `<b>${fmtParam(s)}</b>`);
       const rp = h('label', 'ic', `<input type="checkbox" ${s.ramp ? 'checked' : ''}> ramp in`); rp.querySelector('input').onchange = e => { s.ramp = e.target.checked; dirty(); };
@@ -4828,7 +5027,7 @@ const TL = (() => {
       insp.append(lab, time, h('span', 'iv', 'gain'), gn);
     }
   }
-  const fmtParam = s => { const p = E.mods[s.mod]?.params[s.key]; if (!p) return ''; const o = p.n; p.n = s.n; const d = p.display(); p.n = o; return d; };
+  const fmtParam = s => { const p = mm(s.mod)?.params[s.key]; if (!p) return ''; const o = p.n; p.n = s.n; const d = p.display(); p.n = o; return d; };
 
   // ======================= POINTER EDITING =======================
   function hit(x, y) {
@@ -5009,7 +5208,7 @@ const TL = (() => {
     };
     type.onchange = fill; fill();
     const btns = h('div', 'row'), ok = h('button', 'btn primary grow', 'Add'), cancel = h('button', 'btn', 'Cancel');
-    ok.onclick = () => { const ev = { id: uid(), t: T.pos, src: 'you', ...box.get() }; T.events.push(ev); T.sel.clear(); T.sel.add(ev.id); pop.hidden = true; T.inspDirty = true; dirty(); };
+    ok.onclick = () => { const ev = { id: uid(), t: T.pos, src: 'you', ...box.get() }; if (ev.mod && E.V) ev.mod = keyOf(E.V, ev.mod); /* the dialog lists the layer on screen */ T.events.push(ev); T.sel.clear(); T.sel.add(ev.id); pop.hidden = true; T.inspDirty = true; dirty(); };
     cancel.onclick = () => { pop.hidden = true; };
     btns.append(ok, cancel); pop.append(btns);
   }
@@ -5035,6 +5234,317 @@ const TL = (() => {
 
   Object.assign(T, { play, stop, record, seek, takeSnapshot: snapshot, restore, addFiles, ensureTape, draw, lanes: () => L });
   return T;
+})();
+
+</script>
+<script>
+// mix.js — the AI's mix engineer. Meters every mixer channel (loudness-weighted, like LUFS), works out what each
+// channel is playing (drums, bass, lead, arp, texture, effects), and balances them: drums as the anchor, bass just
+// under the kick, the lead up front, arps tucked behind, textures and noises buried. A watchdog also catches
+// high-pitched, repeating sounds that have been left on too long and darkens, lowers or mutes them.
+'use strict';
+const Mix = (() => {
+  const E = Engine, clamp = DSP.clamp, $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const M = { on: true, last: [null, null], lastPass: [0, 0], want: [0, 0], shrill: {}, strikes: {}, busy: false };
+  // where each kind of part sits, in dB relative to the drums
+  const TARGET = { drums: 0, bass: -1.5, lead: -3, arp: -8, texture: -11, fx: -13, other: -6 };
+  const WHY = { drums: 'the drums anchor the mix', bass: 'the bass sits just under the kick', lead: 'the lead sits up front', arp: 'the arp tucks in behind the lead', texture: 'texture belongs in the back', fx: 'noises and effects stay in the background', other: 'a supporting part, behind the lead' };
+  const ORDER = ['drums', 'bass', 'lead', 'arp', 'other', 'texture', 'fx'];
+
+  // loudness weighting per FFT bin (K-weighting: high-pass near 40 Hz and a +4 dB shelf above ~2 kHz)
+  const N = 1024, W = new Float32Array(N), sr = E.ctx.sampleRate;
+  for (let i = 0; i < N; i++) {
+    const f = Math.max(1, i / N * sr / 2), hp = Math.pow(f, 4) / (Math.pow(f, 4) + Math.pow(40, 4));
+    const t = clamp((Math.log2(f) - Math.log2(1000)) / (Math.log2(3000) - Math.log2(1000)));
+    W[i] = hp * Math.pow(10, 4 * t * t * (3 - 2 * t) / 10);
+  }
+  const HI = Math.round(3000 / (sr / 2) * N); // "high-pitched" = energy above 3 kHz
+
+  // ---------- who plays what ----------
+  function roleOf(id, depth = 0) {
+    const m = E.mods[id]; if (!m || depth > 4) return 'other';
+    const k = m.kind;
+    if (k === 'Tape') return null;
+    if (k === 'Drums') return 'drums';
+    if (k === 'Geiger') return 'fx';
+    if (k === 'Grains') return 'texture';
+    if (k === 'Titan') return 'bass';
+    if (m.ins.NOTE) {
+      const c = E.findCable(id, 'NOTE'), src = c && E.mods[c.from.mod];
+      if (!src) return 'other';
+      if (src.kind === 'StepSeq') {
+        const part = Song.partsBy?.[E.L]?.[src.id]; if (part) return part;
+        const oct = +src.params.oct.choice;
+        return oct <= 2 ? 'bass' : (k === 'Chip' || k === 'Bodies') ? 'arp' : 'lead';
+      }
+      return (k === 'Bodies' && src.kind === 'Geiger') ? 'texture' : 'arp';
+    }
+    // a processor (filter, folder): it plays whatever feeds it
+    const up = E.cables.find(c => c.to.mod === id && m.ins[c.to.port]?.jt === 'audio');
+    return up ? roleOf(up.from.mod, depth + 1) : 'other';
+  }
+  // the voice behind a channel (follows filters and folders upstream)
+  function voiceOf(id, depth = 0) {
+    const m = E.mods[id]; if (!m || depth > 4) return id;
+    if (m.ins.NOTE || ['Drums', 'Geiger', 'Grains', 'Titan'].includes(m.kind)) return id;
+    const up = E.cables.find(c => c.to.mod === id && m.ins[c.to.port]?.jt === 'audio');
+    return up ? voiceOf(up.from.mod, depth + 1) : id;
+  }
+  function channels() {
+    const out = [];
+    for (const mid of E.order) {
+      const mx = E.mods[mid]; if (mx.kind !== 'Mixer') continue;
+      for (let i = 1; i <= 8; i++) {
+        const c = E.findCable(mid, 'IN' + i); if (!c) continue;
+        const role = roleOf(c.from.mod); if (!role) continue;
+        const src = c.from.mod;
+        out.push({ mix: mid, ch: i, key: 'l' + i, src, voice: voiceOf(src), name: E.mods[src].name, role, an: mx.ch[i - 1].an, level: mx.params['l' + i], send: mx.params['s' + i] });
+      }
+    }
+    return out;
+  }
+
+  // ---------- metering ----------
+  async function measure(L = E.V, ms = 2000) {
+    const chs = E.within(L, channels); if (!chs.length) return null;
+    const buf = new Float32Array(N);
+    chs.forEach(c => { c.p = 0; c.raw = 0; c.hi = 0; c.k = 0; });
+    const frames = Math.max(3, Math.round(ms / 60));
+    for (let f = 0; f < frames; f++) {
+      for (const c of chs) {
+        c.an.getFloatFrequencyData(buf);
+        let w = 0, raw = 0, hi = 0;
+        for (let i = 1; i < N; i++) { const v = buf[i]; if (!(v > -160)) continue; const pw = Math.pow(10, v / 10); w += pw * W[i]; raw += pw; if (i >= HI) hi += pw; }
+        c.p += w; c.raw += raw; c.hi += hi; c.k++;
+      }
+      await sleep(60);
+    }
+    for (const c of chs) { c.db = 10 * Math.log10(c.p / c.k + 1e-20); c.hiShare = c.raw > 0 ? c.hi / c.raw : 0; c.active = c.db > -80; delete c.an; }
+    const act = chs.filter(c => c.active);
+    const implied = c => c.db - TARGET[c.role];
+    const drums = act.find(c => c.role === 'drums');
+    const med = arr => { const s = arr.slice().sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : -60; };
+    const ref = drums ? implied(drums) : med(act.map(implied));
+    const seen = {};
+    act.sort((a, b) => ORDER.indexOf(a.role) - ORDER.indexOf(b.role)).forEach(c => {
+      seen[c.role] = (seen[c.role] || 0) + 1;
+      c.want = ref + TARGET[c.role] - (seen[c.role] - 1) * 3; // a second part of the same kind sits a bit further back
+      c.err = c.want - c.db;
+    });
+    const err = act.length > 1 ? act.reduce((s, c) => s + Math.abs(c.err), 0) / act.length : 0;
+    return { L, t: performance.now(), chs, ref, err };
+  }
+
+  // ---------- balancing ----------
+  function plan(meas, max = 5) {
+    const moves = [];
+    for (const c of meas.chs) {
+      if (!c.active || c.err == null) continue;
+      const d = clamp(c.err, -9, 6); if (Math.abs(d) < 2) continue;
+      const nv = clamp(c.level.n * Math.pow(10, d / 40), 0.06, 1);
+      if (Math.abs(nv - c.level.n) < 0.02) continue;
+      moves.push({ c, d, nv });
+    }
+    moves.sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
+    const acts = moves.slice(0, max).map(({ c, d, nv }) => ({ do: 'knob', mod: c.mix, key: c.key, to: nv, why: `${c.name} ${d > 0 ? 'up' : 'down'} ${Math.abs(d).toFixed(0)} dB: ${WHY[c.role]}` }));
+    // sends: keep the low end dry, push background parts back with space
+    for (const c of meas.chs) {
+      if (!c.active || !c.send) continue;
+      if (c.role === 'bass' && c.send.n > 0.2) acts.push({ do: 'knob', mod: c.mix, key: 's' + c.ch, to: 0.06, why: `keep the bass dry and centred` });
+      else if ((c.role === 'texture' || c.role === 'fx') && c.send.n < 0.28) acts.push({ do: 'knob', mod: c.mix, key: 's' + c.ch, to: 0.35, why: `push ${c.name} back with reverb and delay` });
+    }
+    return acts;
+  }
+  const rel = c => { const d = c.db - c.want; return Math.abs(d) < 2 ? 'sits right' : `${Math.abs(d).toFixed(0)} dB too ${d > 0 ? 'loud' : 'quiet'}`; };
+  function summary(meas) {
+    return meas.chs.filter(c => c.active).map(c => `${c.name} (${c.role}) ${rel(c)}`).join(' · ');
+  }
+  function describe() {
+    return [0, 1].map(L => M.last[L] && E.hasLayer(L) ? `${E.layerName(L)} mix: ${summary(M.last[L])}` : null).filter(Boolean).join('\n') || 'no mix measurement yet';
+  }
+  function applyNow(acts) { for (const a of acts) { const p = E.mods[a.mod]?.params[a.key]; if (p) p.setNorm(typeof a.to === 'number' ? a.to : (p.normOf(a.to) ?? p.n)); } }
+  // measure, then rebalance with the hand (or instantly, on a layer that is not on screen)
+  async function pass({ L = E.V, h = 0, why = '' } = {}) {
+    if (M.busy || !E.hasLayer(L)) return [];
+    M.busy = true;
+    try {
+      const meas = await measure(L, 2200); if (!meas) return [];
+      M.last[L] = meas; M.lastPass[L] = performance.now(); M.want[L] = 0;
+      const acts = E.within(L, () => plan(meas));
+      AI.log('mix', `mix check${E.hasLayer(1) ? ' on ' + E.layerName(L) : ''}${why ? ' (' + esc(why) + ')' : ''}: ${esc(summary(meas)) || 'nothing playing'}`);
+      if (!acts.length) return acts;
+      if (L === AI.viewTarget()) await AI.runAll([{ do: 'say', text: `Mixing: ${acts.length} level${acts.length > 1 ? 's' : ''} to fix so every part sits in its place.` }, ...acts], h);
+      else E.within(L, () => applyNow(acts));
+      return acts;
+    } finally { M.busy = false; }
+  }
+  // the performer asks this between moves
+  const needs = L => M.on && E.hasLayer(L) && !M.busy && ((M.want[L] && performance.now() > M.want[L]) || (M.last[L] && M.last[L].err > 2.5 && performance.now() - M.lastPass[L] > 15000 && performance.now() - M.last[L].t < 6000));
+  const wantSoon = (L, ms = 3000) => { M.want[L] = performance.now() + ms; };
+
+  // ---------- shrill guard ----------
+  const K = (mod, key, to, why) => ({ do: 'knob', mod, key, to, why });
+  const stepDown = p => p.steps ? String(p.steps[Math.max(0, p.value - 1)]) : null;
+  function shrillFix(c) {
+    const acts = [], v = c.voice, m = E.mods[v], key = `${c.mix}.${c.ch}`;
+    const strikes = M.strikes[key] = (M.strikes[key] || 0) + 1;
+    if (strikes >= 3) return [K(c.mix, c.key, 0.05, `${c.name} keeps sounding shrill: taking it out of the mix`)];
+    if (m) {
+      if (m.kind === 'Analog') { if (m.params.cutoff.n > 0.4) acts.push(K(v, 'cutoff', m.params.cutoff.n - 0.2, 'darken the shrill top')); if (m.params.res.n > 0.55) acts.push(K(v, 'res', 0.35, 'tame the whistling resonance')); }
+      if (m.kind === 'VCFQ' && m.params.cut) acts.push(K(v, 'cut', Math.max(0.2, m.params.cut.n - 0.2), 'darken the shrill top'));
+      if ((m.kind === 'Chip' || m.kind === 'Bodies') && m.params.oct.value > 0) acts.push(K(v, 'oct', stepDown(m.params.oct), 'an octave down: too high and piercing'));
+      if (m.kind === 'Bodies' && m.params.bright.n > 0.4) acts.push(K(v, 'bright', m.params.bright.n - 0.25, 'softer, less piercing strike'));
+      if (m.kind === 'Chip' && m.params.wave.choice === 'P12') acts.push(K(v, 'wave', 'TRI', 'a softer wave than the thin 12% pulse'));
+      if (m.kind === 'Geiger') acts.push(K(v, 'tone', Math.max(0, m.params.tone.n - 0.3), 'duller clicks'), K(v, 'vol', m.params.vol.n * 0.6, 'quieter clicks'));
+      const nc = E.findCable(v, 'NOTE'), seq = nc && E.mods[nc.from.mod];
+      if (seq?.kind === 'StepSeq' && +seq.params.oct.choice >= 5) acts.push(K(seq.id, 'oct', stepDown(seq.params.oct), `${seq.name} an octave down, it was too high`));
+    }
+    acts.push(K(c.mix, c.key, clamp(c.level.n * Math.pow(10, -5 / 40), 0.05, 1), `${c.name} down 5 dB: a high, repeating sound grates when it is left on`));
+    return acts;
+  }
+  // static check at design time: resonance screams and parts pitched too high
+  function ungrate(why = 'nothing high-pitched should be left grating') {
+    const acts = [];
+    for (const id of E.order) {
+      const m = E.mods[id]; if (!m || !E.cables.some(c => c.from.mod === id)) continue;
+      if (m.kind === 'Analog' && m.params.res.n > 0.85 && m.params.cutoff.n > 0.7) acts.push(K(id, 'res', 0.5, 'a resonant peak this high screams'));
+      if (m.kind === 'StepSeq' && +m.params.oct.choice >= 6 && E.cablesFrom(id, 'NOTE').length) acts.push(K(id, 'oct', '5', `${m.name} out of the piercing top octave`));
+      if ((m.kind === 'Chip' || m.kind === 'Bodies') && m.params.oct.value >= m.params.oct.steps.length - 1) acts.push(K(id, 'oct', stepDown(m.params.oct), 'too high, it would whistle'));
+      if (m.kind === 'Geiger' && m.params.vol.n > 0.7) acts.push(K(id, 'vol', 0.45, 'clicks belong in the background'));
+    }
+    if (acts.length) acts.unshift({ do: 'say', text: `Checking for shrill sounds: ${why}.` });
+    return acts;
+  }
+  // every few seconds while the AI is in charge: meter the audible layers, flag shrill parts and drifting balance
+  async function watch() {
+    if (!M.on || !E.running || !(AI.busy || Song.on) || M.busy) return;
+    for (const L of [0, 1]) {
+      if (!E.hasLayer(L) || E.layers[L].bus.gain.value < 0.15) continue;
+      const meas = await measure(L, 900); if (!meas) continue;
+      M.last[L] = meas;
+      for (const c of meas.chs) {
+        const key = `${L}.${c.mix}.${c.ch}`;
+        const shrill = c.active && c.role !== 'drums' && c.hiShare > 0.38 && c.db > meas.ref - 15;
+        M.shrill[key] = shrill ? (M.shrill[key] || 0) + 3 : 0;
+        if (M.shrill[key] >= 12) { // a high, repeating sound left on for 12 seconds: fix it now
+          M.shrill[key] = 0;
+          const acts = E.within(L, () => shrillFix(c));
+          AI.log('mix', `${esc(c.name)} has been high-pitched and repeating for a while (${Math.round(c.hiShare * 100)}% of it above 3 kHz): fixing it before it grates`);
+          if (L === AI.viewTarget() && AI.busy) AI.runAll(acts, 1); else E.within(L, () => applyNow(acts));
+        }
+        if (c.role === 'drums' && c.active && c.hiShare > 0.8) { // all sizzle and no thump: pull the hats back a little
+          const d = E.layers[L].mods[c.voice];
+          if (d?.lvl && performance.now() - (d._hatFix || 0) > 30000) { d._hatFix = performance.now(); ['CH', 'OH', 'CY'].forEach(ins => { const i = d.INST.indexOf(ins); if (i >= 0) d.lvl[i] = Math.max(0.35, d.lvl[i] * 0.8); }); AI.log('mix', 'the hi-hats were sizzling over everything: pulled them back'); }
+        }
+      }
+    }
+  }
+  setInterval(() => { watch().catch(e => console.error(e)); }, 3000);
+
+  const box = $('#automix'); if (box) box.onchange = () => { M.on = box.checked; };
+  const btn = $('#mixnow');
+  if (btn) btn.onclick = async () => {
+    if (!E.running) { AI.log('sys', 'start the clock first: the mix engineer needs to hear the parts'); return; }
+    if (AI.busy) { wantSoon(E.V, 0); AI.log('sys', 'the performer will rebalance the mix after its current move'); return; }
+    AI.setBusy(true); try { await pass({ why: 'you asked' }); } finally { AI.setBusy(false); }
+  };
+  return Object.assign(M, { measure, plan, pass, needs, wantSoon, ungrate, shrillFix, describe, channels, roleOf, TARGET });
+})();
+
+</script>
+<script>
+// layers.js — Layer A and Layer B: two complete, independent modular systems in one rack view. Duplicate one into
+// the other, switch which one is on screen, and crossfade their masters (by hand, or by the song engine).
+'use strict';
+const Layers = (() => {
+  const E = Engine, $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const dataOf = m => m.kind === 'StepSeq' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn }
+    : m.kind === 'Drums' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn, mute: m.mute, lvl: m.lvl } : null;
+  const SKIP = new Set(['Tape']); // the timeline's tape belongs to the timeline, not to a layer
+
+  // everything needed to rebuild a layer: modules, knob positions, patterns and cables
+  function snapshot(L) {
+    return E.within(L, () => ({
+      mods: E.order.map(id => E.mods[id]).filter(m => !SKIP.has(m.kind)).map(m => ({
+        id: m.id, kind: m.kind, name: m.name, stripe: m.stripe, model: m.params.model?.choice,
+        params: Object.fromEntries(m.paramOrder.map(k => [k, m.params[k].n])), data: dataOf(m) && JSON.parse(JSON.stringify(dataOf(m)))
+      })),
+      cables: E.cables.filter(c => !SKIP.has(E.mods[c.from.mod]?.kind) && !SKIP.has(E.mods[c.to.mod]?.kind)).map(c => ({ from: { ...c.from }, to: { ...c.to }, color: c.color }))
+    }));
+  }
+  function clear(L) {
+    E.within(L, () => { E.clearCables(); for (const id of [...E.order]) UI.removeModule(id, true); });
+  }
+  function load(L, snap) {
+    E.within(L, () => {
+      for (const s of snap.mods) {
+        let m;
+        try { m = Mods.make(s.kind, s.id, { name: s.name, stripe: s.stripe, model: s.model }); } catch (e) { console.error('layer copy', s.kind, e); continue; }
+        m.name = s.name; E.add(m); UI.renderModule(m);
+      }
+      for (const s of snap.mods) {
+        const m = E.mods[s.id]; if (!m) continue;
+        for (const [k, n] of Object.entries(s.params)) m.params[k]?.setNorm(n, true);
+        const d = s.data && JSON.parse(JSON.stringify(s.data));
+        if (d && m.kind === 'StepSeq') { m.pats = d.pats; m.cur = d.cur; m.song = d.song; m.songOn = d.songOn; m.next = null; m.ui?.renderAll(); }
+        if (d && m.kind === 'Drums') { m.pats = d.pats; m.cur = d.cur; m.song = d.song; m.songOn = d.songOn; m.mute = d.mute; if (d.lvl) m.lvl = d.lvl; m.next = null; m.ui?.renderGrid(); }
+      }
+      for (const c of snap.cables) E.connect(c.from, c.to, { color: c.color });
+    });
+    if (L === E.V) { UI.syncCables(); UI.layout(); }
+    UI.status(); paint();
+  }
+  // copy the whole system in layer `from` into layer `to` (replacing what was there)
+  function duplicate(from = 0, to = 1) {
+    const snap = snapshot(from);
+    clear(to); load(to, snap);
+    E.fire('layercopy', { from, to });
+    return snap.mods.length;
+  }
+  // a layer's audible level as a 0..1 crossfader position
+  const xpos = () => { const a = E.layers[0].bus.gain.value, b = E.layers[1].bus.gain.value; return a + b < 1e-4 ? 0 : Math.atan2(b, a) / (Math.PI / 2); };
+  // equal-power crossfade: 0 = only A, 1 = only B
+  function crossfade(x, sec = 0.05, at) {
+    x = DSP.clamp(x);
+    E.fadeLayer(0, Math.cos(x * Math.PI / 2), sec, at); E.fadeLayer(1, Math.sin(x * Math.PI / 2), sec, at);
+  }
+
+  // ---------- the layer bar ----------
+  function show(L) {
+    if (L === 1 && !E.hasLayer(1)) { const n = duplicate(0, 1); AI.log('sys', `Layer B created: duplicated all ${n} modules of Layer A into a second, independent system`); }
+    if (AI.busy) { AI.toLayer(L, 'you switched the view'); return; }
+    UI.showLayer(L);
+  }
+  function paint() {
+    $$('.ltab').forEach(b => { const on = +b.dataset.l === E.V; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+    const n = E.layers[1].order.length;
+    $('#lnote').textContent = n ? `Showing ${E.layerName(E.V)}` : 'Layer B is empty: open it to duplicate Layer A';
+    $('.ltab[data-l="1"]').classList.toggle('empty', !n);
+  }
+  $$('.ltab').forEach(b => { b.onclick = () => show(+b.dataset.l); });
+  $('#dupab').onclick = () => {
+    const n = duplicate(0, 1);
+    AI.log('sys', `you copied Layer A into Layer B (${n} modules). Layer B is ${E.layers[1].level > 0.05 ? 'audible' : 'silent until you crossfade to it'}.`);
+  };
+  const xf = $('#xfade'); let dragging = false;
+  xf.addEventListener('input', () => {
+    dragging = true;
+    if (+xf.value > 0 && !E.hasLayer(1)) { duplicate(0, 1); AI.log('sys', 'Layer B created as a copy of Layer A'); }
+    crossfade(+xf.value / 1000, 0.06);
+  });
+  xf.addEventListener('change', () => { dragging = false; });
+  // meters and the crossfader follow fades the AI makes
+  const ma = $('#lma'), mb = $('#lmb');
+  setInterval(() => {
+    const a = E.layers[0].bus.gain.value, b = E.layers[1].bus.gain.value;
+    ma.style.width = Math.round(a * 100) + '%'; mb.style.width = Math.round(b * 100) + '%';
+    if (!dragging) xf.value = Math.round(xpos() * 1000);
+  }, 120);
+  E.on('view', paint);
+  paint();
+  return { snapshot, load, clear, duplicate, crossfade, xpos, show, paint };
 })();
 
 </script>

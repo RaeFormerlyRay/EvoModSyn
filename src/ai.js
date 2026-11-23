@@ -271,6 +271,53 @@ const AI = (() => {
     handLock[h] = go.catch(() => {});
     return go;
   }
+  // Switch the layer the hands work on (and the view) once both hands have finished what they are doing.
+  // Work queued after this lands on the new layer.
+  A.pendingView = null;
+  const viewTarget = () => A.pendingView ?? E.V;
+  function toLayer(L, why) {
+    if (!E.hasLayer(L) || viewTarget() === L) return Promise.resolve();
+    A.pendingView = L;
+    const go = Promise.all([handLock[0], handLock[1]]).then(() => {
+      if (E.V !== L) { UI.showLayer(L); A.log('sys', `now on <b>${E.layerName(L)}</b>${why ? ' · ' + esc(why) : ''}`); }
+      if (A.pendingView === L) A.pendingView = null;
+    });
+    handLock[0] = handLock[1] = go.catch(() => {});
+    return go;
+  }
+  A.toLayer = toLayer; A.viewTarget = viewTarget;
+  // Give Layer B its own character: same key and tempo, different voices, kit and space (choruses live there)
+  function contrastActs(p) {
+    const acts = [{ do: 'say', text: 'Giving Layer B a contrasting sound: different voice models, kit and space, so the switch to it feels like a lift.' }];
+    const out = id => E.cablesFrom(id, 'OUT').length > 0;
+    for (const id of E.order) {
+      const m = E.mods[id];
+      if (m.kind === 'Analog' && out(id)) {
+        if (m.params.model.choice !== 'ACID') acts.push(K(id, 'model', pick(Mods.MODELS.filter(x => x !== 'ACID' && x !== m.params.model.choice)), 'a different voice model for this layer'));
+        acts.push(K(id, 'cutoff', clamp(m.params.cutoff.n + 0.08 + rnd() * 0.08), 'a little brighter'));
+      }
+      if (m.kind === 'Titan' && out(id)) acts.push(K(id, 'cut', clamp(m.params.cut.n + 0.1), 'open the bass up'));
+      if (m.kind === 'Bodies' && out(id)) acts.push(K(id, 'model', pick(m.params.model.steps.filter(x => x !== m.params.model.choice)), 'a different body'));
+      if (m.kind === 'StepSeq' && E.cablesFrom(id, 'NOTE').length && +m.params.oct.choice >= 3 && +m.params.oct.choice <= 3 && rnd() < 0.5) acts.push(K(id, 'oct', '4', 'lift the line an octave on this layer'));
+    }
+    if (E.mods.drums && routed('drums')) acts.push(K('drums', 'kit', pick(Mods.KITS.filter(k => k !== E.mods.drums.params.kit.choice)), 'a different kit for this layer'), K('drums', 'drive', clamp(E.mods.drums.params.drive.n + 0.1), 'a bit more punch'));
+    if (E.mods.mixer) acts.push(K('mixer', 'verb', clamp(E.mods.mixer.params.verb.n + 0.08), 'a wider space'), K('mixer', 'dtime', pick(['1/8', '3/16', '1/4']), 'a different echo'));
+    if (E.order.length < 24 && rnd() < 0.5) acts.push(...newLayer(p, new Set(CORE_IDS), false));
+    return acts;
+  }
+  // duplicate the finished Layer A into Layer B, then make B its own system
+  async function buildLayerB(p) {
+    A.stateName = 'Building Layer B';
+    const n = Layers.duplicate(0, 1);
+    A.log('sys', `duplicated the whole rack (${n} modules, ${E.layers[1].cables.length} cables) into <b>Layer B</b>, a second independent modular system`);
+    A.think('Building Layer B', 'Layer B is a full copy of the rack. I am giving it a contrasting sound for the choruses; the song will crossfade between the two layers.');
+    await toLayer(1, 'giving Layer B its own sound');
+    await runAll(contrastActs(p));
+    if (A.abort) return;
+    const f = [...Theory.unfart('Layer B: no farty synths'), ...Mix.ungrate('Layer B')]; if (f.length) await runAll(f);
+    if (Mix.on && !A.abort) await Mix.pass({ L: 1, why: 'balance Layer B' });
+    await toLayer(0, 'back to Layer A to start the song');
+  }
 
   // ======================= READING THE BRIEF =======================
   const GENRES = {
@@ -881,6 +928,8 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       await runAll(acts);
       if (!E.running) await run({ do: 'transport', run: true });
       { const f = Theory.unfart('sound design check: no farty synths'); if (f.length && !A.abort) { A.log('sys', 'checking the sound design: avoiding farty, blatty synth settings'); await runAll(f); } }
+      { const g = Mix.ungrate(); if (g.length && !A.abort) await runAll(g); }
+      if (Mix.on && !A.abort) { A.stateName = 'Mixing'; await Mix.pass({ why: 'balance the new patch' }); }
     } else {
       // tweak: change targets from adjectives
       const t = task;
@@ -905,7 +954,10 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     if (A.abort) return finish();
 
     // song structure: plan the form and the first section, then the song engine runs on the bar line
-    if (A.songForm && p.mode !== 'tweak') { A.stateName = 'Arranging the song'; if (!(await Song.begin(p, { loop: p.mode !== 'perform' }))) A.songForm = null; }
+    const twoLayers = A.songForm && p.mode !== 'tweak' && $('#layerson')?.checked;
+    if (twoLayers && !A.abort) await buildLayerB(p);
+    if (A.abort) return finish();
+    if (A.songForm && p.mode !== 'tweak') { A.stateName = 'Arranging the song'; await toLayer(0); if (!(await Song.begin(p, { loop: p.mode !== 'perform', layers: twoLayers }))) A.songForm = null; }
     if (A.abort) return finish();
 
     if (p.mode === 'perform' && A.songForm) {
@@ -914,6 +966,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       if (!A.abort) {
         A.stateName = 'Ending the set'; A.think('Ending the set', 'The song is over. Fading out and stopping the clock.');
         Song.stop();
+        if (E.hasLayer(1)) { const other = 1 - E.V; if (E.layers[other].bus.gain.value > 0.01) E.fadeLayer(other, 0, 6); }
         await run(K('mixer', 'master', 0.05, 'fade out', 6000));
         await run({ do: 'transport', run: false });
         await run(K('mixer', 'master', 0.8, 'reset the master for next time', 400));
@@ -939,6 +992,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
           continue;
         }
         if (A.fixQueue.length) { await runAll(A.fixQueue.splice(0)); continue; }
+        if (Mix.needs(E.V)) { await Mix.pass({ why: 'the balance drifted' }); continue; }
         await shapeOnce();
         const pause = (2200 + rnd() * 3500) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.4);
         await UI.sleep(pause);
@@ -953,7 +1007,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     } else {
       A.stateName = 'Listening and tuning';
       const n = p.mode === 'tweak' ? 6 : 5;
-      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
+      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); if (Mix.needs(E.V)) await Mix.pass({ why: 'the balance drifted' }); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
       if (!A.abort) { A.think('Patch ready', A.songForm ? `Done. The ${p.genre} song keeps playing and I keep writing each next section while it loops. Ask for changes, or run a live set.` : `Done. The ${p.genre} patch keeps playing. Ask for changes like "make it darker" or "add the geiger counter", or run a live set.`); A.log('sys', 'patch ready'); }
     }
     finish();

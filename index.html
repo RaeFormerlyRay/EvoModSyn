@@ -50,6 +50,11 @@
       </select>
     </div>
     <div class="row">
+      <label class="check"><input type="checkbox" id="layerson" checked> Two layers</label>
+      <label class="check"><input type="checkbox" id="automix" checked> Auto-mix</label>
+      <button class="btn" type="button" id="mixnow">Mix now</button>
+    </div>
+    <div class="row">
       <button class="btn primary grow" id="run">Perform</button>
       <button class="btn stop" id="stop" disabled>Stop AI</button>
     </div>
@@ -102,6 +107,13 @@
   </aside>
 
   <div class="stage">
+  <div class="layerbar" id="layerbar">
+    <div class="ltabs" role="tablist" aria-label="Rack layers"><button class="ltab on" type="button" data-l="0" role="tab" aria-selected="true">Layer A</button><button class="ltab" type="button" data-l="1" role="tab" aria-selected="false">Layer B</button></div>
+    <label class="xfade" title="Crossfade the two layers' masters">A <input type="range" id="xfade" min="0" max="1000" value="0" aria-label="Crossfade between layer A and layer B"> B</label>
+    <span class="lmeters" aria-hidden="true"><i id="lma"></i><i id="lmb"></i></span>
+    <button class="btn" type="button" id="dupab" title="Duplicate the whole Layer A rack into Layer B">Copy A → B</button>
+    <span class="lnote" id="lnote">Layer B is empty</span>
+  </div>
   <div class="rackrow" id="rackrow">
   <section class="rackwrap" id="rackwrap">
     <div id="rack">
@@ -134,6 +146,8 @@
 <script src="src/song.js"></script>
 <script src="src/critic.js"></script>
 <script src="src/timeline.js"></script>
+<script src="src/mix.js"></script>
+<script src="src/layers.js"></script>
 <script src="src/main.js"></script>
 <!--BODY-END-->
 </body>

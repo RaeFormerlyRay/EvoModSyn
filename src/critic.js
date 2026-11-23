@@ -9,7 +9,7 @@ const Critic = (() => {
 
   // ======================= RECORD =======================
   function record(sec = 6) {
-    const ctx = E.ctx, an = E.mods.monitor.analyser, n = Math.floor(ctx.sampleRate * sec);
+    const ctx = E.ctx, an = E.outAn, n = Math.floor(ctx.sampleRate * sec);
     const buf = new Float32Array(n); let w = 0;
     const sp = ctx.createScriptProcessor(4096, 1, 1), mute = ctx.createGain(); mute.gain.value = 0;
     an.connect(sp); sp.connect(mute); mute.connect(ctx.destination);
@@ -176,6 +176,9 @@ Notes: lowMid is the share of energy between 120 and 450 Hz; above 0.5 with a lo
 SEQUENCERS (notes are scale degrees, . = rest):
 ${seqLines}
 CABLES: ${cables}
+PER-CHANNEL BALANCE (loudness-weighted, against where each kind of part should sit: drums anchor, bass just under, lead up front, arps behind, textures buried):
+${typeof Mix !== 'undefined' ? Mix.describe() : 'n/a'}
+Also judge the mix (parts too loud or too quiet: fix with mixer lN knobs) and any high-pitched, repeating sound left on too long (darken it, lower its octave or take it out).
 RECENT AI ACTIONS:
 ${recent || 'none'}
 

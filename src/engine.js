@@ -4,8 +4,28 @@ const Engine = (() => {
   const AC = window.AudioContext || window.webkitAudioContext;
   const ctx = new AC({ latencyHint: 'interactive' });
   const E = {
-    ctx, bpm: 126, swing: 0, running: false, mods: {}, order: [], cables: [],
+    ctx, bpm: 126, swing: 0, running: false,
     noise: null, uiq: [], listeners: { change: [] }, step: 0, nextTime: 0
+  };
+  // ---------- Layers ----------
+  // Two independent modular systems (Layer A and Layer B), each with its own modules, cables, chords and master
+  // bus. E.mods / E.order / E.cables / E.harmony always mean the layer in context (E.L). E.V is the layer on
+  // screen, which is also the one the hands work on. E.within(L, fn) runs fn with layer L in context.
+  E.out = ctx.createGain(); E.out.connect(ctx.destination);
+  E.outAn = ctx.createAnalyser(); E.outAn.fftSize = 2048; E.outAn.smoothingTimeConstant = 0.6; E.out.connect(E.outAn);
+  const mkLayer = i => { const bus = ctx.createGain(); bus.gain.value = i ? 0 : 1; bus.connect(E.out); return { i, name: 'AB'[i], mods: {}, order: [], cables: [], harmony: [], bus, level: i ? 0 : 1 }; };
+  E.layers = [mkLayer(0), mkLayer(1)]; E.L = 0; E.V = 0;
+  ['mods', 'order', 'cables', 'harmony'].forEach(k => Object.defineProperty(E, k, { get: () => E.layers[E.L][k], set: v => { E.layers[E.L][k] = v; } }));
+  E.within = (L, fn) => { const o = E.L; E.L = L; try { return fn(); } finally { E.L = o; } };
+  E.hasLayer = L => E.layers[L].order.length > 0;
+  E.layerName = L => 'Layer ' + 'AB'[L];
+  // fade a layer's master bus to `to` over `sec` seconds, starting at audio time `at` (default now)
+  E.fadeLayer = (L, to, sec = 0.05, at) => {
+    const g = E.layers[L].bus.gain, now = ctx.currentTime, t = Math.max(now, at ?? now);
+    if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(t); else { g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); }
+    g.linearRampToValueAtTime(to, t + Math.max(0.01, sec));
+    E.layers[L].level = to;
+    E.fire('layerfade', { L, to, sec, at: t });
   };
   // Record every source node a module starts while it is being built, so the module can be removed cleanly later
   E._collect = null;
@@ -108,7 +128,7 @@ const Engine = (() => {
     return true;
   };
   E.add = (mod) => {
-    E.mods[mod.id] = mod; E.order.push(mod.id);
+    mod.layer = E.L; E.mods[mod.id] = mod; E.order.push(mod.id);
     for (const k of mod.paramOrder) { const p = mod.params[k]; if (p.apply) { try { p.apply(p.value, p); } catch (e) { console.error(mod.id, k, e); } } }
     return mod;
   };
@@ -163,17 +183,20 @@ const Engine = (() => {
       while (E.nextTime < horizon) {
         const t = E.nextTime, dur = E.sixteenth();
         const sw = (E.step % 2 === 1) ? E.swing * dur * 0.5 : 0;
-        const clock = E.mods.clock;
-        if (clock) clock.emitTick(t + sw, E.step, dur);
+        // both layers run on the same transport so they stay in time and can crossfade on the beat
+        for (const Ly of E.layers) { const clock = Ly.mods.clock; if (clock) E.within(Ly.i, () => clock.emitTick(t + sw, E.step, dur)); }
         E.step++;
         E.nextTime += dur;
       }
     }
-    for (const id of E.order) { const m = E.mods[id]; if (!m) continue; if (m.tick !== Module.prototype.tick) m.tick(now, horizon); }
+    for (const Ly of E.layers) {
+      if (!Ly.order.length) continue;
+      E.within(Ly.i, () => { for (const id of Ly.order) { const m = Ly.mods[id]; if (!m) continue; if (m.tick !== Module.prototype.tick) m.tick(now, horizon); } });
+    }
   }
   // setInterval keeps running when the tab is hidden (throttled), rAF does not
   setInterval(pass, 25);
-  E.start = () => { if (E.running) return; E.running = true; E.step = 0; E.harmony = []; E.nextTime = ctx.currentTime + 0.06; E.fire('transport', true); };
+  E.start = () => { if (E.running) return; E.running = true; E.step = 0; E.layers.forEach(Ly => { Ly.harmony = []; }); E.nextTime = ctx.currentTime + 0.06; E.fire('transport', true); };
   E.stop = () => { if (!E.running) return; E.running = false; E.fire('transport', false); };
   E.setBpm = (b) => { E.bpm = DSP.clamp(b, 40, 220); E.fire('bpm', E.bpm); };
   return E;

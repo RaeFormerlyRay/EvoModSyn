@@ -598,12 +598,13 @@ const Mods = (() => {
     fx.connect(conv); conv.connect(vret); vret.connect(master);
     m.ch = [];
     for (let i = 1; i <= 8; i++) {
-      const inp = gain(1), lv = gain(0.7), sd = gain(0);
-      inp.connect(lv); lv.connect(master); lv.connect(sd); sd.connect(fx);
+      const inp = gain(1), lv = gain(0.7), sd = gain(0), an = ctx.createAnalyser();
+      an.fftSize = 2048; an.smoothingTimeConstant = 0; // per-channel meter for the auto-mix
+      inp.connect(lv); lv.connect(master); lv.connect(sd); sd.connect(fx); lv.connect(an);
       m.p('l' + i, { label: 'Ch' + i, def: 0.7, fmt: pct, small: true, apply: v => smooth(lv.gain, v * v * 1.4) });
       m.p('s' + i, { label: 'Fx' + i, def: 0.1, fmt: pct, small: true, apply: v => smooth(sd.gain, v * 0.9) });
       m.inAudio('IN' + i, inp, 'channel ' + i);
-      m.ch.push({ inp, lv, sd });
+      m.ch.push({ inp, lv, sd, an });
     }
     const DT = ['1/16', '1/8', '3/16', '1/4', '3/8', '1/2'], DTB = [0.25, 0.5, 0.75, 1, 1.5, 2];
     const setDT = () => smooth(dl.delayTime, Math.min(1.9, 60 / E.bpm * DTB[m.v('dtime')]), 0.08);
@@ -624,7 +625,7 @@ const Mods = (() => {
     const inp = gain(1), lim = ctx.createDynamicsCompressor(), vol = gain(0.8), an = ctx.createAnalyser();
     lim.threshold.value = -6; lim.knee.value = 4; lim.ratio.value = 14; lim.attack.value = 0.002; lim.release.value = 0.12;
     an.fftSize = 2048; an.smoothingTimeConstant = 0.6;
-    inp.connect(lim); lim.connect(vol); vol.connect(an); an.connect(ctx.destination);
+    inp.connect(lim); lim.connect(vol); vol.connect(an); an.connect(E.layers[E.L].bus); // each layer's monitor feeds that layer's master bus
     m.p('vol', { label: 'Volume', def: 0.8, fmt: pct, apply: v => smooth(vol.gain, v) });
     m.inAudio('IN', inp, 'to speakers');
     for (let i = 2; i <= 4; i++) { const g = gain(1); g.connect(inp); m.inAudio('IN' + i, g, 'extra mixer in'); }

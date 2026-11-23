@@ -5,9 +5,13 @@
 const Song = (() => {
   const E = Engine, T = Theory, $ = s => document.querySelector(s), clamp = DSP.clamp, rnd = Math.random, pick = T.pick;
   const L8 = 'ABCDEFGH';
-  const S = { on: false, form: null, sections: [], cur: -1, startBar: null, bar: -1, total: 0, loop: false, done: false, parts: {}, hook: null, verse: null, progs: {}, lift: 0, base: null, planning: -1, autos: [], fresh: {}, p: null, ready: false };
+  const S = { on: false, form: null, sections: [], cur: -1, startBar: null, bar: -1, total: 0, loop: false, done: false, partsBy: [{}, {}], two: false, live: 0, hook: null, verse: null, progs: {}, lift: 0, base: null, planning: -1, autos: [], fresh: {}, p: null, ready: false };
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const log = (h) => AI.log('song', h);
+  // each layer has its own parts (which sequencer plays bass, lead, arp); S.parts means the layer in context
+  Object.defineProperty(S, 'parts', { get: () => S.partsBy[E.L], set: v => { S.partsBy[E.L] = v; }, enumerable: true });
+  // with two layers, choruses (and sometimes the bridge) live on Layer B, everything else on Layer A
+  const layerFor = role => !S.two ? 0 : ['chorus', 'drop', 'post'].includes(role) ? 1 : ['bridge', 'break'].includes(role) ? (rnd() < 0.5 ? 1 : 0) : 0;
   const DRUM_SLOT = { intro: 0, verse: 1, pre: 2, build: 2, chorus: 3, drop: 3, post: 4, bridge: 4, break: 4, outro: 5 }, ROLL = 6, FILL = 7, PULL = 7;
   // how many bars each kind of part may loop unchanged before it starts to grate
   const PATIENCE = { lead: 8, arp: 12, bass: 16, drums: 16, texture: 24 };
@@ -45,7 +49,7 @@ const Song = (() => {
       const b = Math.max(4, Math.round(bars * k / 4) * 4);
       const R = T.ROLES[role], fin = tag === 'final';
       const name = role === 'pre' ? 'Pre-chorus' : role === 'post' ? 'Post-chorus' : (fin ? 'Final ' : '') + role[0].toUpperCase() + role.slice(1);
-      out.push({ i, role, name, bars: b, start: bar, final: fin, energy: fin ? T.FINAL.energy : R.energy, slot: fin ? T.FINAL.slot : R.slot, dslot: DRUM_SLOT[role] ?? 1, why: fin ? T.FINAL.why : R.why, planned: false, written: false });
+      out.push({ i, role, name, bars: b, start: bar, final: fin, layer: layerFor(role), energy: fin ? T.FINAL.energy : R.energy, slot: fin ? T.FINAL.slot : R.slot, dslot: DRUM_SLOT[role] ?? 1, why: fin ? T.FINAL.why : R.why, planned: false, written: false });
       bar += b;
     });
     // number repeated sections: Verse 2, Chorus 2
@@ -54,7 +58,8 @@ const Song = (() => {
   }
 
   // ======================= PLANNING (data) =======================
-  function planData(s) {
+  function planData(s) { return E.within(s.layer || 0, () => planData0(s)); }
+  function planData0(s) {
     const scale = E.mods.seq1?.params.scale.choice || 'MINOR', role = s.role;
     const prev = S.progs[role];
     // repeated sections keep their harmony (that is what makes them recognisable); verse 2 sometimes varies it
@@ -86,7 +91,8 @@ const Song = (() => {
     return acts;
   }
   // instant write (when the hand did not get there in time)
-  function writeNow(s) {
+  function writeNow(s) { return E.within(s.layer || 0, () => writeNow0(s)); }
+  function writeNow0(s) {
     for (const [id, line] of Object.entries(s.parts)) { const m = E.mods[id]; if (!m) continue; m.pats[s.slot] = Array.from({ length: 16 }, (_, i) => ({ n: line.notes[i] ?? 0, g: line.notes[i] == null ? 0 : 1, a: (line.accents || []).includes(i) ? 1 : 0, s: (line.slides || []).includes(i) ? 1 : 0, p: line.probs?.[i] ?? 1, r: line.ratchets?.[i] ?? 1 })); m.ui?.renderAll(); }
     const d = E.mods.drums; if (d) { d.pats[s.dslot] = d.INST.map(ins => String(s.drums[ins] || '').padEnd(16, '.').slice(0, 16).split('').map(c => c === 'X' ? 2 : c === 'x' ? 1 : 0)); d.ui?.renderGrid(); }
     s.written = true;
@@ -96,9 +102,10 @@ const Song = (() => {
   // optional: Claude writes the next section while this one plays
   async function claudeSection(s) {
     if ($('#brain')?.value !== 'claude' || !AI.claude) return false;
-    const scale = E.mods.seq1?.params.scale.choice, root = E.mods.seq1?.params.root.choice;
-    const partsTxt = Object.entries(S.parts).map(([id, part]) => { const m = E.mods[id]; return `${id} (${part}, drives ${E.cablesFrom(id, 'NOTE').map(c => c.to.mod).join('+')}, octave ${m.params.oct.choice})`; }).join('; ');
-    const prevTxt = S.sections.filter(x => x.planned && x !== s).slice(-3).map(x => `${x.name}: chords ${x.prog?.join(',')}; ` + Object.entries(x.parts || {}).map(([id, l]) => `${id} ${l.notes.map(v => v == null ? '.' : v).join(' ')}`).join(' | ')).join('\n');
+    const L = s.layer || 0;
+    const { scale, root, partsTxt, prevTxt } = E.within(L, () => ({ scale: E.mods.seq1?.params.scale.choice, root: E.mods.seq1?.params.root.choice,
+      partsTxt: Object.entries(S.parts).map(([id, part]) => { const m = E.mods[id]; return `${id} (${part}, drives ${E.cablesFrom(id, 'NOTE').map(c => c.to.mod).join('+')}, octave ${m.params.oct.choice})`; }).join('; '),
+      prevTxt: S.sections.filter(x => x.planned && x !== s).slice(-3).map(x => `${x.name}: chords ${x.prog?.join(',')}; ` + Object.entries(x.parts || {}).map(([id, l]) => `${id} ${l.notes.map(v => v == null ? '.' : v).join(' ')}`).join(' | ')).join('\n') }));
     const prompt = `${T.PRIMER}
 
 You are writing the next section of a song that is playing live on a modular synth. Key: ${root} ${scale}. Genre: ${S.p?.genre}. Personality: ${S.p?.persona}.
@@ -112,6 +119,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     try {
       const r = await AI.claude.json(prompt, { modelTier: 'default' });
       if (!r || !Array.isArray(r.progression) || !r.parts) return false;
+      return E.within(L, () => {
       const okLine = l => Array.isArray(l?.notes) && l.notes.length >= 8;
       s.prog = r.progression.map(x => clamp(Math.round(+x) || 0, 0, 6)).slice(0, 8); s.hr = [1, 2, 4].includes(+r.barsPerChord) ? +r.barsPerChord : s.hr;
       s.chords = s.prog.map(d => T.chordName(scale, d)).join(' – '); s.cadence = 'Claude\'s choice';
@@ -120,6 +128,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       if ((s.role === 'chorus' || s.role === 'drop') && !S.hook) { const lead = Object.keys(S.parts).find(id => S.parts[id] === 'lead'); if (lead) S.hook = s.parts[lead].notes; }
       log(`Claude wrote ${esc(s.name)}: ${esc(r.idea || '')}`);
       return true;
+      });
     } catch (e) { log(`Claude could not plan ${esc(s.name)} (${esc(e.code || e.message)}), using the built-in theory`); return false; }
   }
   async function planAhead(i) {
@@ -129,8 +138,12 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     await claudeSection(s);
     // a section reusing the bank that is playing right now cannot be written ahead: it repeats the live patterns
     const live = S.sections[S.cur];
-    if (live && live.slot === s.slot && live.dslot === s.dslot) { s.written = true; s.parts = live.parts; s.drums = live.drums; S.planning = -1; render(); return; }
-    if (S.on) await AI.runAll(writeActs(s, true), 1); // the second hand plans ahead while the first tweaks
+    if (live && (live.layer || 0) === (s.layer || 0) && live.slot === s.slot && live.dslot === s.dslot) { s.written = true; s.parts = live.parts; s.drums = live.drums; S.planning = -1; render(); return; }
+    if (S.on) {
+      // the second hand plans ahead while the first tweaks; a section on the layer that is off screen is written directly
+      if ((s.layer || 0) === AI.viewTarget()) await AI.runAll(writeActs(s, true), 1);
+      else { writeNow(s); log(`${esc(s.name)} written into ${E.layerName(s.layer)}, waiting silently for its crossfade`); }
+    }
     if (!s.written) s.written = S.sections[i] === s;
     S.planning = -1; render();
   }
@@ -138,6 +151,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   // ======================= THE BAR CLOCK =======================
   // fired while scheduling the downbeat of bar `bar`; everything queued here lands on the next bar line
   function onBar(ev) {
+    if (E.L !== 0) return; // both layers' clocks tick together: Layer A's bar drives the song
     if (!S.on || !E.running) return;
     if (S.startBar == null) return;
     const songBar = ev.bar - S.startBar; S.bar = songBar;
@@ -147,10 +161,22 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     const idx = S.sections.findIndex(s => s.start === nextBar);
     if (idx >= 0) enter(idx, tNext, (ev.bar + 1) * 16);
     else inside(nextBar, tNext);
-    freshness(songBar);
+    E.within(S.live, () => freshness(songBar));
   }
   E.on('bar', onBar);
   function enter(i, t, step) {
+    const s = S.sections[i], L = s.layer || 0, prev = S.live;
+    E.within(L, () => enter0(i, t, step));
+    if (L !== prev) crossTo(L, prev, t, s);
+  }
+  // crossfade the layers' masters across the downbeat: the new layer rises over the last beat, the old one falls after
+  function crossTo(L, prev, t, s) {
+    const beat = 4 * E.sixteenth();
+    E.fadeLayer(L, 1, beat, t - beat); E.fadeLayer(prev, 0, beat * 2, t);
+    S.live = L;
+    E.at(t, () => log(`crossfade: ${E.layerName(prev)} fades down, ${E.layerName(L)} fades up for ${esc(s.name)}`));
+  }
+  function enter0(i, t, step) {
     const s = S.sections[i];
     if (!s.planned) planData(s);
     if (!s.written) writeNow(s);
@@ -163,6 +189,8 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     if (s.final && !S.lift && rnd() < 0.5) lift(t);
     E.at(t, () => {
       S.cur = i; render();
+      if (UI.followMode !== 'off' && (s.layer || 0) !== AI.viewTarget()) AI.toLayer(s.layer || 0, `${s.name} lives on ${E.layerName(s.layer || 0)}`);
+      Mix.wantSoon(s.layer || 0, 2 * 16 * E.sixteenth() * 1000); // rebalance once the new section has settled
       log(`<b>${esc(s.name)}</b> · ${esc(s.chords)} · energy ${Math.round(s.energy * 100)}%`);
       AI.think(`Song · ${s.name}`, `${s.name}: ${s.chords}. ${s.why}.`);
       Object.keys(S.fresh).forEach(k => { S.fresh[k] = 0; });
@@ -173,6 +201,15 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   // inside a section: fills on phrase ends, the build's roll and pull, small push-pull waves
   function inside(nextBar, t) {
     const s = S.sections.find(x => nextBar >= x.start && nextBar < x.start + x.bars); if (!s) return;
+    const nx = S.sections[S.sections.indexOf(s) + 1], k = nextBar - s.start, barS = 16 * E.sixteenth();
+    if (nx && (nx.layer || 0) !== (s.layer || 0) && (s.role === 'build' || s.role === 'pre')) {
+      // push-pull across layers: the next layer creeps in under the build, then drops out for the pull bar
+      if (k === Math.floor(s.bars / 2)) { E.fadeLayer(nx.layer || 0, 0.22, (s.bars - k - 1) * barS, t); E.at(t, () => log(`${E.layerName(nx.layer || 0)} creeps in under the build`)); }
+      if (s.bars - k === 1) E.fadeLayer(nx.layer || 0, 0, barS * 0.25, t);
+    }
+    E.within(s.layer || 0, () => inside0(s, nextBar, t));
+  }
+  function inside0(s, nextBar, t) {
     const k = nextBar - s.start, left = s.bars - k, d = E.mods.drums;
     const isBuild = s.role === 'build' || s.role === 'pre';
     if (isBuild && d) {
@@ -217,7 +254,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   function lift(t) {
     S.lift = pick([1, 2]);
     setTimeout(() => {
-      for (const id of [...Object.keys(S.parts), 'ent', 'marbles']) { const p = E.mods[id]?.params.root; if (p) p.setNorm(p.normOf(DSP.NOTE_NAMES[(p.value + S.lift) % 12])); }
+      for (const L of [0, 1]) E.within(L, () => { for (const id of [...Object.keys(S.parts), 'ent', 'marbles']) { const p = E.mods[id]?.params.root; if (p) p.setNorm(p.normOf(DSP.NOTE_NAMES[(p.value + S.lift) % 12])); } });
       log(`key lift: up ${S.lift} semitone${S.lift > 1 ? 's' : ''} for the final chorus`);
     }, Math.max(0, (t - E.ctx.currentTime - 0.18) * 1000));
   }
@@ -251,6 +288,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       const v = AI.variation(m.pats[m.cur].map(x => x.g ? x.n : null), pick(['B', 'B', 'C']));
       acts = [{ do: 'steps', mod: id, notes: v.notes, ratchets: v.ratchets, accents: m.pats[m.cur].map((x, i) => x.a ? i : -1).filter(i => i >= 0), why: `${kind} looped ${bars} bars unchanged, getting same-y: ${v.why}` }];
     }
+    if (E.L !== AI.viewTarget()) return; // that layer is off screen: let the hand do it once it is back
     if (AI.busy && !S.on) AI.fixQueue.push(...acts); else AI.runAll(acts, 1);
   }
 
@@ -259,9 +297,10 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     stop();
     const form = choice(p); if (!form) return false;
     S.p = p; S.form = form; S.loop = !!o.loop; S.done = false; S.cur = -1; S.hook = null; S.verse = null; S.progs = {}; S.lift = 0; S.fresh = {}; S.autos = [];
-    S.parts = assignParts();
-    if (!Object.keys(S.parts).length) { log('no sequencer is playing a voice, so there is no song to arrange'); return false; }
-    S.base = drumBase();
+    S.partsBy = [E.within(0, assignParts), E.hasLayer(1) ? E.within(1, assignParts) : {}];
+    if (!Object.keys(S.partsBy[0]).length) { log('no sequencer is playing a voice, so there is no song to arrange'); return false; }
+    S.two = !!o.layers && Object.keys(S.partsBy[1]).length > 0; S.live = 0;
+    S.base = E.within(0, drumBase);
     const L = layout(form, p); S.sections = L.sections; S.total = L.total;
     AI.blocked = new Set(['switch pattern', 'write variation', 'transpose', 'add layer', 'layer in', 'layer out', 'drop kick', 'bring kick']);
     // every part follows the song's chords and switches on the bar line; song chains are off (the song engine drives)
@@ -270,6 +309,13 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     E.mods.drums?.setSong(null, false);
     // pull pattern slot for every part (silent bass, sparse others)
     for (const id of Object.keys(S.parts)) { const m = E.mods[id]; m.pats[7] = m.pats[7].map(x => ({ ...x, g: 0 })); }
+    // Layer B gets the same set-up directly (it is off screen and silent until its first crossfade)
+    if (S.two) E.within(1, () => {
+      for (const id of Object.keys(S.parts)) { const m = E.mods[id]; m.setSong(null, false); m.params.follow.setNorm(m.params.follow.normOf('SONG')); m.params.len.setNorm(m.params.len.normOf('16') ?? 1); m.params.trans.setNorm(m.params.trans.normOf('0') ?? m.params.trans.n); m.pats[7] = m.pats[7].map(x => ({ ...x, g: 0 })); }
+      E.mods.drums?.setSong(null, false);
+    });
+    E.fadeLayer(0, 1, 0.3); if (E.hasLayer(1)) E.fadeLayer(1, 0, 0.3);
+    if (S.two) acts.push({ do: 'say', text: `Two layers: ${S.sections.filter(s => s.layer).map(s => s.name).join(', ')} live on Layer B; the rest on Layer A. The masters crossfade on the downbeats.` });
     S.on = true; render();
     await AI.runAll(acts);
     planData(S.sections[0]); await claudeSection(S.sections[0]);
@@ -284,6 +330,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   async function performLoop(p) {
     while (!AI.abort && S.on && !S.done) {
       if (AI.fixQueue.length) { await AI.runAll(AI.fixQueue.splice(0)); continue; }
+      if (Mix.needs(AI.viewTarget())) { await AI.toLayer(S.live); await Mix.pass({ L: E.V, why: 'new section, new balance' }); continue; }
       await AI.shapeOnce();
       await UI.sleep((2600 + rnd() * 3200) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.35));
     }
@@ -298,7 +345,8 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     S.sections.forEach((s, i) => {
       const d = document.createElement('div'); d.className = 'sec songsec' + (i === S.cur ? ' now' : '') + (S.planning === i ? ' planning' : '') + (s.written && i !== S.cur ? ' ready' : '');
       d.style.flex = s.bars; d.title = `${s.name}: ${s.bars} bars${s.chords ? ' · ' + s.chords : ''}${s.cadence ? ' · ' + s.cadence : ''}. ${s.why}`;
-      d.innerHTML = `<span>${esc(s.name.replace('Final ', 'Fin. '))}</span><i style="height:${Math.round(s.energy * 100)}%"></i>`;
+      d.innerHTML = `<span>${esc(s.name.replace('Final ', 'Fin. '))}${S.two ? `<b class="ly">${'AB'[s.layer || 0]}</b>` : ''}</span><i style="height:${Math.round(s.energy * 100)}%"></i>`;
+      if (S.two && s.layer) d.classList.add('lyb');
       el.append(d);
     });
     const hd = document.createElement('div'); hd.className = 'head'; hd.id = 'songhead'; el.append(hd);

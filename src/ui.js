@@ -6,7 +6,10 @@ const UI = (() => {
   const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const rack = $('#rack'), wrap = $('#rackwrap'), svg = $('#cables'), hand = $('#aihand'), handLbl = $('#aihandlbl'), readout = $('#readout');
   const SVGNS = 'http://www.w3.org/2000/svg';
-  const U = { modEls: {}, knobs: {}, jacks: {}, jpos: {}, temp: null, speed: 1 };
+  const U = { temp: null, speed: 1 };
+  // modules, knobs and jacks are kept per layer; these maps follow the layer in context (Engine.L)
+  const LU = [0, 1].map(() => ({ modEls: {}, knobs: {}, jacks: {}, jpos: {} }));
+  ['modEls', 'knobs', 'jacks', 'jpos'].forEach(k => Object.defineProperty(U, k, { get: () => LU[E.L][k] }));
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   U.sleep = sleep;
@@ -276,13 +279,13 @@ const UI = (() => {
   U.animated = [];
   U.customs = customs; U.fitCanvas = fitCanvas; U.h = h; // other files register panel displays here
   let buildingId = null;
-  U.anim = f => { f._mod = buildingId; U.animated.push(f); };
+  U.anim = f => { f._mod = buildingId; f._layer = E.L; U.animated.push(f); };
   const FIXED = new Set(['clock', 'mixer', 'monitor']);
 
   // ---------- build rack ----------
   function renderModule(m, isNew) {
     const id = m.id; buildingId = id;
-    const el = h('div', 'mod' + (isNew ? ' mod-new' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id;
+    const el = h('div', 'mod' + (isNew ? ' mod-new' : '') + (E.L !== E.V ? ' offlayer' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id; el.dataset.layer = E.L;
     const pk = Panels.key(m); if (pk) { el.style.setProperty('--panel-img', `url("${Panels.url(pk)}")`); el.classList.add('worn'); if (Panels.light(pk)) el.classList.add('light'); }
     el.innerHTML = `<div class="mod-h"><span class="nm">${m.name}</span><span class="sub">${m.sub}</span></div>`;
     if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; x.onclick = () => U.removeModule(id); el.querySelector('.mod-h').append(x); }
@@ -308,7 +311,7 @@ const UI = (() => {
     new ResizeObserver(() => U.layout()).observe(rack);
     window.addEventListener('resize', () => U.layout());
     U.layout();
-    E.on('change', ev => { if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
+    E.on('change', ev => { if (E.L !== E.V) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
     requestAnimationFrame(frame);
   };
   // Add a new module of a registered type to the end of the rack; returns its id
@@ -320,25 +323,36 @@ const UI = (() => {
     E.fire('modules', { type: 'add', id });
     return id;
   };
-  U.removeModule = function (id) {
-    if (FIXED.has(id) || !E.mods[id]) return false;
+  U.renderModule = renderModule;
+  U.removeModule = function (id, force) {
+    if ((FIXED.has(id) && !force) || !E.mods[id]) return false;
     E.remove(id);
     U.modEls[id]?.remove(); delete U.modEls[id];
     for (const k of Object.keys(U.jacks)) if (k.startsWith(id + '.')) { delete U.jacks[k]; delete U.jpos[k]; }
     for (const k of Object.keys(U.knobs)) if (k.startsWith(id + '.')) delete U.knobs[k];
-    U.animated = U.animated.filter(f => f._mod !== id);
-    U.syncCables(); U.layout(); U.status();
+    U.animated = U.animated.filter(f => f._mod !== id || f._layer !== E.L);
+    if (E.L === E.V) { U.syncCables(); U.layout(); U.status(); }
     return true;
+  };
+  // show one layer's rack: the other layer keeps running (and sounding, if its master is up) off screen
+  U.showLayer = function (L) {
+    E.V = L; E.L = L;
+    rack.querySelectorAll('.mod').forEach(el => el.classList.toggle('offlayer', +el.dataset.layer !== L));
+    for (const g of cabEls.values()) g.remove(); cabEls.clear();
+    U.handOff(); U.syncCables(); U.layout(); U.status();
+    document.body.dataset.layer = 'AB'[L];
+    E.fire('view', L);
   };
 
   U.layout = function () {
+    if (E.L !== E.V) return;
     const rr = rack.getBoundingClientRect();
     for (const k in U.jacks) { const r = U.jacks[k].querySelector('.hole').getBoundingClientRect(); U.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
     svg.setAttribute('width', rack.scrollWidth); svg.setAttribute('height', rack.scrollHeight);
     svg.style.width = rack.scrollWidth + 'px'; svg.style.height = rack.scrollHeight + 'px';
   };
   U.jackXY = (mod, dir, port) => U.jpos[`${mod}.${dir}.${port}`];
-  U.status = () => { $('#cpu').textContent = `${E.order.length} modules · ${E.cables.length} cables`; };
+  U.status = () => { const Ly = E.layers[E.V]; $('#cpu').textContent = `${E.layerName(E.V)} · ${Ly.order.length} modules · ${Ly.cables.length} cables`; };
 
   // ---------- cables ----------
   const cabEls = new Map();
@@ -348,6 +362,7 @@ const UI = (() => {
     svg.append(g); return g;
   }
   U.syncCables = function () {
+    if (E.L !== E.V) return;
     const ids = new Set(E.cables.map(c => c.id));
     for (const [id, g] of cabEls) if (!ids.has(id)) { g.remove(); cabEls.delete(id); }
     for (const c of E.cables) if (!cabEls.has(c.id)) cabEls.set(c.id, mkCableEl(c.color));
@@ -531,7 +546,7 @@ const UI = (() => {
   function frame() {
     E.flushUI();
     drawAllCables();
-    for (const f of U.animated) f();
+    for (const f of U.animated) if (f._layer === E.V) f();
     requestAnimationFrame(frame);
   }
 
