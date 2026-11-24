@@ -11,6 +11,40 @@
     mk('Mixer', 'mixer'), mk('Monitor', 'monitor')
   ].forEach(E.add);
   UI.build();
+  // the factory rack (default knobs, empty patterns, no cables), kept so a reset can rebuild it from nothing
+  const PRISTINE = Layers.snapshot(0);
+
+  // wipe everything back to a blank rack: Layer B emptied, every added module removed, every core module rebuilt
+  // with empty patterns, no cables, no song or harmony. zero: also turn every knob all the way down (bipolar knobs
+  // to centre). Selector switches and the tempo stay at their defaults, since "down" has no meaning for them.
+  function wipe(zero) {
+    Song.stop?.();
+    E.layers.forEach(Ly => { Ly.harmony = []; });
+    if (E.hasLayer(1)) Layers.clear(1);
+    Layers.crossfade(0, 0.05);
+    if (UI.split) UI.setSplit(false);
+    if (E.V !== 0 || E.L !== 0) UI.showLayer(0);
+    E.within(0, () => {
+      E.clearCables();
+      for (const id of [...E.order]) if (E.mods[id].kind !== 'Tape') UI.removeModule(id, true);
+    });
+    Layers.load(0, PRISTINE);
+    let n = 0;
+    if (zero) E.within(0, () => {
+      for (const id of E.order) {
+        const m = E.mods[id]; if (m.kind === 'Tape') continue;
+        for (const k of m.paramOrder) {
+          const p = m.params[k];
+          if (p.steps || (m.kind === 'Clock' && k === 'bpm')) continue; // switches and tempo stay at their defaults
+          p.setNorm(p.min < 0 && p.max > 0 ? 0.5 : 0); n++;
+        }
+      }
+    });
+    E.within(0, () => E.order.forEach(id => { const m = E.mods[id]; m.ui?.renderAll?.(); m.ui?.renderSteps?.(); m.ui?.renderGrid?.(); }));
+    UI.syncCables(); UI.layout(); UI.status(); Layers.paint?.();
+    return { mods: E.layers[0].order.length, knobs: n };
+  }
+  AI.wipe = wipe;
 
   function starter() {
     E.clearCables();
@@ -50,10 +84,11 @@
   Object.entries(Mods.TYPES).forEach(([k, t]) => { const o = document.createElement('option'); o.value = k; o.textContent = t.label; addSel.append(o); });
   addSel.onchange = () => { const t = addSel.value; addSel.value = ''; if (!t) return; E.within(E.V, () => { const id = UI.createModule(t); const el = UI.modEls[id]; el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); AI.log('sys', `you added ${E.mods[id].name} to ${E.layerName(E.V)}`); }); };
   $('#clearpatch').onclick = () => E.clearCables();
-  // every knob on every module back to its default (patterns and cables stay)
-  $('#resetknobs').onclick = () => {
-    let n = 0; for (const id of E.order) { const m = E.mods[id]; for (const k of m.paramOrder) { const p = m.params[k]; if (Math.abs(p.n - p.defN) > 1e-4) { p.setNorm(p.defN); n++; } } }
-    AI.log('sys', `you reset ${n} knob${n === 1 ? '' : 's'} on ${E.order.length} modules to their defaults`);
+  // Reset: stop the AI, empty Layer B, remove every added module, clear every pattern and cable, turn every knob down
+  $('#resetknobs').onclick = async () => {
+    if (AI.busy) { AI.stop(); for (let i = 0; i < 40 && AI.busy; i++) await new Promise(r => setTimeout(r, 100)); } // let the AI put its hands down first
+    const r = wipe(true);
+    AI.log('sys', `you reset the whole rack: ${r.mods} core modules rebuilt from scratch, all patterns and cables cleared, ${r.knobs} knobs turned down`);
   };
 
   // ----- console -----

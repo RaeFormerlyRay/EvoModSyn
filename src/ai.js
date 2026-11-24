@@ -288,7 +288,7 @@ const AI = (() => {
         case 'wait': await UI.sleep((a.sec || 1) * 1000); break;
         default: A.log('err', `skipped unknown action "${esc(a.do)}"`);
       }
-    } catch (e) { console.error(e); A.log('err', 'action failed: ' + esc(e.message)); }
+    } catch (e) { if (A.abort) return; console.error(e); A.log('err', 'action failed: ' + esc(e.message)); } // a stopped AI's half-done move is dropped quietly
   }
   A.run = run;
   // turn a modulation depth with the hand on the knob, so the coloured ring visibly grows or shrinks
@@ -1172,7 +1172,8 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     if (A.busy) return;
     A.abort = false; setBusy(true);
     const p = parseBrief(task, persona); A.prof = p;
-    if (p.mode !== 'tweak') Song.stop(); A.songForm = Song.choice(p);
+    // a new design or set always starts from a blank rack: nothing left over from the last one
+    if (p.mode !== 'tweak') { Song.stop(); if (A.wipe) { A.wipe(false); A.log('sys', 'cleared the rack: starting from scratch'); } } A.songForm = Song.choice(p);
     A.startT = performance.now(); A.endT = A.startT + Math.max(p.dur, 60) * 1000; A.sections = null; drawTimeline();
     A.stateName = 'Reading the brief';
     A.log('sys', `<b>${esc(task)}</b> — as: ${esc(persona)}`);
