@@ -108,6 +108,7 @@ const AI = (() => {
           const n = normFor(p, a.to); if (n == null) { A.log('err', `skipped ${esc(a.mod)}.${esc(a.key)}: bad value`); break; }
           if (Math.abs(n - p.n) < 0.004) break;
           const before = p.display();
+          remember({ kind: 'knob', mod: a.mod, key: a.key, from: p.n, h });
           await HU.aiKnob(a.mod, a.key, n, a.ms);
           A.log('act', `<b>turn</b> ${m.name} ${p.label} ${esc(before)} → ${esc(p.display())}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -115,6 +116,7 @@ const AI = (() => {
         case 'patch': {
           const from = split(a.from), to = split(a.to);
           if (!E.canConnect(from, to)) { A.log('err', `skipped patch ${esc(a.from)} → ${esc(a.to)} (jacks do not match)`); break; }
+          { const old = E.findCable(to.mod, to.port); remember({ kind: 'patch', to, prev: old && { from: { ...old.from }, to: { ...old.to } }, h }); }
           await HU.aiPatch(from, to);
           A.log('act', `<b>patch</b> ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}${a.why ? ' · ' + esc(a.why) : ''}`);
           break;
@@ -251,11 +253,27 @@ const AI = (() => {
   // Two hands, each with its own queue: lists on the same hand take turns, the two hands work at the same time.
   // With two hands on, back-to-back knob turns on different knobs are shared out so both hands turn at once.
   const handLock = [Promise.resolve(), Promise.resolve()], handBusy = [0, 0];
+  // ----- undo: every knob turn and patch the AI makes is remembered, grouped by the list it came from -----
+  const group = [0, 0], groupName = [null, null]; let groupN = 0;
+  const history = [];
+  function remember(x) { history.push({ ...x, g: group[x.h] || 0, name: groupName[x.h] || null, L: E.V, t: performance.now() }); if (history.length > 400) history.shift(); }
+  A.undo = function () {
+    const last = history[history.length - 1]; if (!last) { A.log('sys', 'nothing of the AI\'s to undo yet'); return; }
+    const batch = []; while (history.length && history[history.length - 1].g === last.g) batch.push(history.pop());
+    let n = 0;
+    for (const x of batch) E.within(x.L, () => {
+      if (x.kind === 'knob') { const p = E.mods[x.mod]?.params[x.key]; if (p) { p.setNorm(x.from); n++; } }
+      else if (x.kind === 'patch') { const c = E.findCable(x.to.mod, x.to.port); if (c) E.disconnect(c); if (x.prev && E.mods[x.prev.from.mod]) E.connect(x.prev.from, x.prev.to); n++; }
+    });
+    const name = batch.find(x => x.name)?.name;
+    if (name) { const q = A.q[name] || { v: 0, n: 0 }; q.v += 0.35 * (-1 - q.v); q.n++; A.q[name] = q; saveQ(); drawSkills(); }
+    A.log('sys', `you undid the AI's last move${name ? ` "<b>${esc(name)}</b>"` : ''}: ${n} change${n === 1 ? '' : 's'} put back${name ? '. It learned you did not like that move.' : ''}`);
+  };
   const isKnob = a => a && a.do === 'knob';
   function runAll(list, h = 0) {
     h = UI.twoHands ? h : 0;
     const go = handLock[h].then(async () => {
-      handBusy[h]++;
+      handBusy[h]++; group[h] = ++groupN; groupName[h] = A.curMove || null; A.curMove = null;
       try {
         for (let i = 0; i < list.length; i++) {
           if (A.abort) return;
@@ -544,6 +562,31 @@ const AI = (() => {
       return [{ do: 'add', type: 'Swarm', id: 'swarm', why: 'eight related LFOs for slow movement' }, K('swarm', 'sync', sync), K('swarm', 'spread', 0.25), K('swarm', 'phase', 1), K('swarm', 'depth', 0.35),
         ...dests.map((d, i) => P(`swarm.O${i * 3 + 1}`, d, 'each destination drifts at its own phase'))];
     },
+    // tape strings, choir or flute from the tape-replay voice: sparse long notes, chords on top
+    reelLayer(p, tape) {
+      const seq = E.newId('seq', new Set(CORE_IDS)), T = tape || pick(['STRINGS', 'CHOIR', 'FLUTE', 'CELLO', 'BRASS']);
+      const notes = Array(16).fill(null); [0, 8].forEach((i, k) => { notes[i] = pick([0, 2, 4, -3, 5]) + (k ? pick([0, 2, -2]) : 0); }); if (rnd() < 0.5) notes[12] = pick([4, 2, 1]);
+      return [{ do: 'say', text: `Adding the tape keyboard: ${T.toLowerCase()} tapes, slow and wobbly, under the lead.` },
+        { do: 'add', type: 'StepSeq', id: seq, why: 'a sequencer for the tape keyboard' }, { do: 'add', type: 'Reel', id: 'reel', why: 'a Mellotron-style tape voice' },
+        P('clock.CLK', `${seq}.CLK`), P(`${seq}.NOTE`, 'reel.NOTE', 'long notes play the tapes'),
+        K(seq, 'scale', keyScale(p)), K(seq, 'root', keyRoot(p)), K(seq, 'oct', 3), K(seq, 'gate', 0.95), K(seq, 'len', 16),
+        { do: 'pattern', mod: seq, pat: 'A', notes, accents: [], slides: [], why: 'sparse sustained notes for the tapes' },
+        K('reel', 'tape', T), K('reel', 'chord', pick(p.tr.dark > 0 ? ['MIN', '5TH', 'OCT'] : ['MAJ', 'SUS', 'OCT', '5TH'])), K('reel', 'sus', clamp(0.5 + p.tr.calm * 0.3), 'notes ring until the tape runs out'),
+        K('reel', 'wow', clamp(0.2 + p.tr.chaos * 0.4), 'tape wobble'), K('reel', 'age', clamp(0.25 + rnd() * 0.3)),
+        { do: 'route', mod: 'reel', level: 0.42, send: 0.45 }];
+    },
+    // put a voice through a low-pass gate pinged by its own sequencer: plucked, woody notes
+    lpgOn(voice) {
+      const nc = E.findCable(voice, 'NOTE'), srcM = nc && E.mods[nc.from.mod], trig = srcM ? (srcM.outs.GATE ? `${srcM.id}.GATE` : srcM.outs.TRIG ? `${srcM.id}.TRIG` : null) : null;
+      const ex = E.cables.find(c => c.from.mod === voice && c.from.port === 'OUT' && E.mods[c.to.mod]?.kind === 'Mixer');
+      const acts = [{ do: 'say', text: `Putting ${E.mods[voice].name} through a low-pass gate, so every note plucks like a struck string or a bongo.` },
+        { do: 'add', type: 'LPG', id: 'lpg', why: 'a vactrol low-pass gate' }];
+      if (ex) acts.push({ do: 'unpatch', to: `${ex.to.mod}.${ex.to.port}`, why: 'the gate takes over this voice' });
+      acts.push(P(`${voice}.OUT`, 'lpg.IN1', 'voice into the gate'), P(trig || 'clock.BEAT', 'lpg.TRIG1', 'each note pings the gate'),
+        K('lpg', 'm1', 'COMBO'), K('lpg', 'd1', clamp(0.3 + rnd() * 0.25), 'how long the pluck rings'), K('lpg', 's1', 0.85), K('lpg', 'o1', 0.05),
+        ex ? P('lpg.OUT1', `${ex.to.mod}.${ex.to.port}`, 'the gated voice back into its channel') : { do: 'route', mod: 'lpg', port: 'OUT1', level: 0.5, send: 0.3 });
+      return acts;
+    },
     grainsOn(src, o = {}) {
       return [{ do: 'add', type: 'Grains', id: 'grains', why: 'a granular processor to turn the voice into texture' }, P(`${src}.OUT`, 'grains.IN', 'feed the voice into the grains'),
         K('grains', 'size', o.size ?? 0.6), K('grains', 'dens', o.dens ?? 0.55), K('grains', 'pitch', o.pitch ?? '0'), K('grains', 'spray', o.spray ?? 0.3), K('grains', 'fb', o.fb ?? 0.05), K('grains', 'mix', 1, 'all wet, the dry voice has its own channel'),
@@ -570,7 +613,7 @@ const AI = (() => {
     techno: p => ({ bpm: 130, acts: [...L.drums(p, 'techno', '909'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'decay', 0.2), ...L.bodies(p, 'MEMBRANE', 1), ...L.slopeTo('acid.CUT'), ...L.workoutDrums('CB', '1/16', 3, 0.9), ...L.grainsOn('bodies', { size: 0.45, dens: 0.4, level: 0.35, send: 0.5 })] }),
     house: p => ({ bpm: 124, acts: [...L.drums(p, 'house', '909'), ...L.lead(p, 'JOVE'), ...L.contourEnv('lead', 'seq2.GATE'), K('lead', 'cutoff', 0.35, 'closed down so the envelope plucks it'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'res', 0.3)] }),
     chip: p => ({ bpm: 150, acts: [...L.drums(p, 'chip', 'LOFI'), ...L.chip(p), ...L.lead(p, 'SEM'), K('seq2', 'oct', 1)] }),
-    ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, 'BELL', 4), ...L.slopeTo('lead.CUT'), ...L.grainsOn('bodies', { size: 0.85, dens: 0.6, pitch: '+12', spray: 0.6, fb: 0.35, level: 0.55, send: 0.7 }), ...L.swarmTo(['grains.POS', 'grains.DENS'], '4 BAR'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
+    ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, 'BELL', 4), ...L.slopeTo('lead.CUT'), ...L.grainsOn('bodies', { size: 0.85, dens: 0.6, pitch: '+12', spray: 0.6, fb: 0.35, level: 0.55, send: 0.7 }), ...(rnd() < 0.6 ? L.reelLayer(p, pick(['CHOIR', 'STRINGS', 'FLUTE'])) : []), ...L.swarmTo(['grains.POS', 'grains.DENS'], '4 BAR'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
     noise: p => ({ bpm: 145, acts: [...L.drums(p, 'noise', 'DIRT'), ...L.geiger(p), ...L.geigerDrums(), ...L.titan(p, true), K('titan', 't1', 'METAL'), P('ent.CV', 'titan.CUT', 'random voltages tear at the bass filter'), P('clock.CLK', 'ent.CLK'), ...L.shTo('fold.FOLD', 'geiger.TRIG'), ...L.grainsOn('titan', { size: 0.3, dens: 0.8, pitch: '-12', spray: 0.8, fb: 0.5, level: 0.4, send: 0.2 })] }),
     trap: p => ({ bpm: 140, acts: [...L.drums(p, 'trap', '808'), K('drums', 'decay', 0.9), K('drums', 'tune', 0.35), ...L.lead(p, 'PROPHECY'), ...L.workoutDrums('CH', '1/32', 11, 0.55)] }),
     experimental: p => ({ bpm: 100, acts: [...L.bodies(p, 'STRING', 1), ...L.geiger(p), P('geiger.TRIG', 'slope.TRIG'), K('slope', 'cycle', 'OFF'), P('ent.CV', 'fold.FOLD', 'noise CV animates the folds'), ...L.chip(p), K('chip', 'wave', 'METAL'), K('mixer', 'l5', 0.35), ...L.marblesLayer(p, 'lead'), K('lead', 'model', 'PROPHECY'), ...L.contourEnv('lead', 'marbles.T1'), K('contour', 'cy2', 'ON'), P('contour.OUT2', 'vcfq.CV', 'cycling function sweeps the filter'), ...L.shTo('lead.FM', 'marbles.T3')] })
@@ -581,8 +624,8 @@ const AI = (() => {
   const CUTKEY = { Analog: 'cutoff', Titan: 'cut', VCFQ: 'freq' };
   const voiceCut = () => E.order.filter(id => CUTKEY[E.mods[id].kind] && routed(id)).map(id => [id, CUTKEY[E.mods[id].kind]]);
   const activeSeqs = () => E.order.filter(id => kindIs(id, 'StepSeq') && E.cablesFrom(id, 'NOTE').length);
-  const VOICE_KINDS = ['Analog', 'Titan', 'Chip', 'Bodies', 'VCFQ'];
-  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq', 'contour', 'swarm', 'work', 'grains', 'marbles', 'tools'];
+  const VOICE_KINDS = ['Analog', 'Titan', 'Chip', 'Bodies', 'VCFQ', 'Reel'];
+  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq', 'contour', 'swarm', 'work', 'grains', 'marbles', 'tools', 'reel', 'lpg'];
 
   // ----- pattern variations and songs -----
   // B: a development of A, C: a stripped-back version, D: a fill. Each picks one of several ways to do it.
@@ -631,8 +674,8 @@ const AI = (() => {
   }
   const LAYERS = {
     acid: ['Analog:LADDER', 'Bodies', 'Chip', 'Analog:SCREAM'], dubstep: ['Chip', 'Analog:SCREAM', 'Bodies'], dnb: ['Analog:JOVE', 'Bodies', 'Chip'],
-    ambient: ['Bodies', 'Analog:JOVE', 'Bodies'], chip: ['Chip', 'Analog:ODYSSEY', 'Chip'], noise: ['Analog:SCREAM', 'Bodies', 'Titan'],
-    experimental: ['Bodies', 'Chip', 'Analog:PROPHECY'], default: ['Analog:PROPHECY', 'Bodies', 'Chip', 'Analog:SEM']
+    ambient: ['Bodies', 'Analog:JOVE', 'Bodies', 'Reel'], chip: ['Chip', 'Analog:ODYSSEY', 'Chip'], noise: ['Analog:SCREAM', 'Bodies', 'Titan'],
+    experimental: ['Bodies', 'Chip', 'Analog:PROPHECY', 'Reel'], default: ['Analog:PROPHECY', 'Bodies', 'Chip', 'Analog:SEM', 'Reel']
   };
   // A brand-new layer: add a sequencer and a voice module, patch them, write patterns and a song
   function newLayer(p, reserved, songOn) {
@@ -652,6 +695,7 @@ const AI = (() => {
     if (type === 'Analog') acts.push(K(vid, 'cutoff', 0.45), K(vid, 'res', 0.35 + p.tr.aggression * 0.3));
     if (type === 'Bodies') acts.push(K(vid, 'model', pick(['BELL', 'MARIMBA', 'GLASS', 'STRING'])));
     if (type === 'Chip') acts.push(K(vid, 'arp', pick(['MAJ', 'MIN', 'OCT', 'OFF'])));
+    if (type === 'Reel') acts.push(K(vid, 'tape', pick(['STRINGS', 'CHOIR', 'FLUTE', 'CELLO'])), K(vid, 'sus', 0.55, 'let the tape notes ring'), K(seq, 'gate', 0.95));
     return acts;
   }
   A.newLayer = newLayer;
@@ -666,7 +710,9 @@ const AI = (() => {
   });
   const freeCV = () => ['acid.CUT', 'lead.CUT', 'titan.CUT', 'vcfq.CV', 'fold.FOLD', 'grains.POS', 'grains.DENS'].filter(d => freeIn(d) && (routed(d.split('.')[0]) || d.startsWith('fold') && E.findCable('fold', 'IN') || d.startsWith('grains')));
   const grainSources = () => ['bodies', 'lead', 'acid', 'chip', 'titan'].filter(routed);
-  const idleVoices = () => ['bodies', 'chip', 'lead'].filter(v => E.mods[v] && !E.findCable(v, 'NOTE'));
+  const idleVoices = () => ['bodies', 'chip', 'lead', 'reel'].filter(v => E.mods[v] && !E.findCable(v, 'NOTE'));
+  // voices played by a sequencer and heard through a mixer channel: candidates for the low-pass gate
+  const lpgTargets = () => ['reel', 'bodies', 'chip', 'lead'].filter(v => E.mods[v] && E.findCable(v, 'NOTE') && E.cables.some(c => c.from.mod === v && c.from.port === 'OUT' && E.mods[c.to.mod]?.kind === 'Mixer'));
   const MOVES = {
     'open filter': { fx: { energy: 0.5, bright: 1 }, ok: () => voiceCut().length, make: () => { const [m, k] = pick(voiceCut()); return [nudge(m, k, 0.08 + rnd() * 0.2, 'wants more brightness', 1500 + rnd() * 2500)]; } },
     'close filter': { fx: { energy: -0.4, bright: -1 }, ok: () => voiceCut().some(([m, k]) => E.mods[m].params[k].n > 0.27), make: () => { const [m, k] = pick(voiceCut().filter(([m, k]) => E.mods[m].params[k].n > 0.27)); const p = E.mods[m].params[k]; return [K(m, k, Math.max(0.24, p.n - (0.08 + rnd() * 0.2)), 'too bright, pulling it back', 1500 + rnd() * 2000)]; } },
@@ -732,6 +778,13 @@ const AI = (() => {
     'add clock brain': { fx: { energy: 0.5, motion: 1, novelty: 1.1 }, ok: () => canAdd() && !E.mods.work && drumsOn(), make: () => { A.lastAdd = performance.now(); return [{ do: 'say', text: 'Adding a clock brain for euclidean extra hits.' }, ...L.workoutDrums(pick(['RS', 'CB', 'CP', 'CH']), pick(['1/16', '1/8T', '1/16T']), pick([3, 5, 7, 9]), 0.8)]; } },
     'add random melody': { fx: { novelty: 1.3, chaos: 0.5, energy: 0.3 }, ok: () => canAdd() && !E.mods.marbles && idleVoices().length, make: () => { A.lastAdd = performance.now(); const v = pick(idleVoices()); return [{ do: 'say', text: `Letting a random generator play ${E.mods[v].name}, in key.` }, ...L.marblesLayer(A.prof, v)]; } },
     'add sample and hold': { fx: { novelty: 1, chaos: 0.8, motion: 0.6 }, ok: () => canAdd() && !E.mods.tools && freeCV().length, make: () => { A.lastAdd = performance.now(); const trig = E.mods.marbles ? 'marbles.T2' : E.mods.work ? 'work.O3' : 'clock.BEAT'; return [{ do: 'say', text: 'Adding sample and hold for stepped random movement.' }, ...L.shTo(pick(freeCV()), trig)]; } },
+    'add tape keyboard': { fx: { novelty: 1.2, energy: 0.1, bright: -0.1 }, ok: () => canAdd() && !E.mods.reel, make: () => { A.lastAdd = performance.now(); return L.reelLayer(A.prof); } },
+    'add low-pass gate': { fx: { novelty: 1.1, motion: 0.5, energy: -0.1 }, ok: () => canAdd() && !E.mods.lpg && lpgTargets().length, make: () => { A.lastAdd = performance.now(); const t = lpgTargets(); return L.lpgOn(t.includes('reel') ? 'reel' : pick(t)); } },
+    'change tape': { fx: { novelty: 0.9 }, ok: () => routed('reel'), make: () => [K('reel', 'tape', pick(Object.keys(Reel.TAPES).filter(t => t !== E.mods.reel.params.tape.choice)), 'swap the tape for another instrument')] },
+    'tape wobble': { fx: { novelty: 0.5, chaos: 0.4, motion: 0.3 }, ok: () => routed('reel'), make: () => [nudge('reel', 'wow', rnd() < 0.5 ? 0.15 : -0.15, 'more or less tape wobble', 1500)] },
+    'tape chord': { fx: { novelty: 0.6, energy: 0.2 }, ok: () => routed('reel'), make: () => [K('reel', 'chord', pick(Object.keys(Reel.CHORDS).filter(c => c !== E.mods.reel.params.chord.choice)), 'a different chord shape on the tapes')] },
+    'gate pluckier': { fx: { energy: 0.3, motion: 0.3 }, ok: () => E.mods.lpg && E.cablesFrom('lpg').length && E.mods.lpg.params.d1.n > 0.2, make: () => [nudge('lpg', 'd1', -0.12, 'shorter, woodier plucks')] },
+    'gate ring': { fx: { energy: -0.2, bright: 0.2 }, ok: () => E.mods.lpg && E.cablesFrom('lpg').length && E.mods.lpg.params.d1.n < 0.8, make: () => [nudge('lpg', 'd1', 0.12, 'let the plucks ring longer')] },
     'grain freeze': { fx: { novelty: 1, motion: -0.3 }, ok: () => routed('grains'), make: () => [K('grains', 'freeze', E.mods.grains.frozen ? 'OFF' : 'ON', E.mods.grains.frozen ? 'let the grains follow the music again' : 'freeze the buffer and hold the texture')] },
     'grain shimmer': { fx: { bright: 0.6, novelty: 0.8 }, ok: () => routed('grains'), make: () => [K('grains', 'pitch', pick(['+12', '+7', '+24', '0', '-12']), 'change the grain pitch'), nudge('grains', 'spray', rnd() * 0.3 - 0.1)] },
     'grain smear': { fx: { energy: -0.3, novelty: 0.6, motion: 0.3 }, ok: () => routed('grains'), make: () => [nudge('grains', 'size', 0.15, 'longer grains, smoother wash', 1500), nudge('grains', 'dens', 0.12)] },
@@ -770,6 +823,7 @@ const AI = (() => {
     const e0 = errNow();
     A.log('ear', `hears energy ${Math.round(ears.energy * 100)}% (want ${Math.round(target.energy * 100)}), brightness ${Math.round(ears.cent)}Hz → chooses <b>${name}</b>${reason ? ' · ' + esc(reason) : ''}`);
     A.think(A.stateName || 'Performing', `Energy ${Math.round(ears.energy * 100)}% vs target ${Math.round(target.energy * 100)}%. Brightness ${Math.round(ears.bright * 100)}% vs ${Math.round(target.bright * 100)}%. Trying "${name}".`);
+    A.curMove = name;
     await runAll(mv.make());
     if (mv.fx.novelty) A.lastNovel = performance.now();
     A.lastMove = name; (A.movesSince = A.movesSince || []).push(name);

@@ -40,6 +40,8 @@ PANELS = {
     'marbles': (360, 'enamel',    (30, 70, 78),    0.60, 0.35, False),  # teal
     'toolbox': (470, 'brushed',   (150, 152, 150), 0.45, 0.30, True),   # bare steel
     'tape':    (230, 'enamel',    (92, 30, 26),    0.65, 0.50, False),  # oxblood tape deck
+    'reel':    (410, 'enamel',    (70, 44, 26),    0.60, 0.45, False),  # walnut-brown tape keyboard
+    'lpg':     (300, 'hammer',    (58, 92, 70),    0.55, 0.40, False),  # green hammertone
 }
 
 

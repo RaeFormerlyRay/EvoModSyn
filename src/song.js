@@ -28,7 +28,7 @@ const Song = (() => {
     for (const id of AI.activeSeqs()) {
       const m = E.mods[id], dests = E.cablesFrom(id, 'NOTE').map(c => E.mods[c.to.mod]).filter(Boolean);
       const kinds = dests.map(d => d.kind), oct = m.params.oct.choice;
-      parts[id] = kinds.includes('Titan') || dests.some(d => d.id === 'acid') || oct <= 2 ? 'bass' : kinds.some(k => k === 'Chip' || k === 'Bodies') ? 'arp' : 'lead';
+      parts[id] = kinds.includes('Titan') || dests.some(d => d.id === 'acid') || oct <= 2 ? 'bass' : kinds.some(k => k === 'Chip' || k === 'Bodies' || k === 'Reel') ? 'arp' : 'lead';
     }
     // keep a single bass line; extra low parts become arps an octave up
     const bass = Object.keys(parts).filter(id => parts[id] === 'bass');

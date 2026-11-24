@@ -53,7 +53,7 @@ Priority mixes four things: how strongly the research shows demand, how big the 
 | # | Module | Inspired by | What it does | Why |
 |---|---|---|---|---|
 | 7 | **Complex oscillator** | Buchla 259 / 261, Make Noise DPO, Larix Origami Duo | Two oscillators with through-zero FM, timbre and symmetry folding, modulation oscillator | Fills the West Coast gap. Huge demand for Buchla-style modules |
-| 8 | **Low-pass gate** | Buchla 292, Three Sisters, Natural Gate, Beacon | Dual vactrol-modeled LPG with plucky decay | The other half of West Coast. Makes Bodies and the complex oscillator sound "bongo" |
+| 8 | ✓ **Low-pass gate** (built 2026-11-24 as LPG Duo) | Buchla 292, Three Sisters, Natural Gate, Beacon | Dual vactrol-modeled LPG with plucky decay | The other half of West Coast. Makes Bodies and the complex oscillator sound "bongo" |
 | 9 | **Macro oscillator** | Mutable Plaits, Modulaire D RÊVE, Nanopolis Antigone | One voice with ~16 engines: VA, FM, formant, speech, chords, wavetable, string, modal, drums, noise | Many sounds in one module is ideal for an AI that needs to try things fast |
 | 10 | **Individual drum voices** | Hexinverter Mutant series, Knobula Drum Farm, Dreadbox Alecto | Separate kick, snare, hats, clap and FM-perc modules, each with CV inputs on tune, decay, tone, drive | Hottest release category. Separate modules let the AI modulate drums with LFOs and envelopes, which the all-in-one Rhythm Composer cannot |
 | 11 | **Topographic drum sequencer** | Mutable Grids, Noise Lab Beat Designer, Euclidean Circles | Drum patterns from a 2D map (x/y), fill density per voice, euclidean mode | The AI can morph grooves smoothly by moving two knobs |
@@ -97,3 +97,8 @@ Priority mixes four things: how strongly the research shows demand, how big the 
 - r/vcvrack favourites thread (mirror): https://redlib.astrial.org/r/vcvrack/comments/1iybbvq/must_try_vcv_modules_any_personal_favourites
 - Consordini, best Eurorack modules: https://consordini.com/best-eurorack-modules/
 - Slint, best sequencer modules: https://slintmusic.com/best-eurorack-sequencer-module/
+
+
+## Added 2026-11-24
+
+- ✓ **Tape-replay voice, "Reel"** (inspired by the 20CC Spectron and Mellotron, scored 9). Built and live.

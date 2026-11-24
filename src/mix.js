@@ -157,6 +157,7 @@ const Mix = (() => {
       if ((m.kind === 'Chip' || m.kind === 'Bodies') && m.params.oct.value > 0) acts.push(K(v, 'oct', stepDown(m.params.oct), 'an octave down: too high and piercing'));
       if (m.kind === 'Bodies' && m.params.bright.n > 0.4) acts.push(K(v, 'bright', m.params.bright.n - 0.25, 'softer, less piercing strike'));
       if (m.kind === 'Chip' && m.params.wave.choice === 'P12') acts.push(K(v, 'wave', 'TRI', 'a softer wave than the thin 12% pulse'));
+      if (m.kind === 'Reel') { if (m.params.oct.value > 1) acts.push(K(v, 'oct', stepDown(m.params.oct), 'an octave down, the tape was too high')); if (m.params.tone.n > 0.5) acts.push(K(v, 'tone', m.params.tone.n - 0.2, 'a darker tape')); }
       if (m.kind === 'Geiger') acts.push(K(v, 'tone', Math.max(0, m.params.tone.n - 0.3), 'duller clicks'), K(v, 'vol', m.params.vol.n * 0.6, 'quieter clicks'));
       const nc = E.findCable(v, 'NOTE'), seq = nc && E.mods[nc.from.mod];
       if (seq?.kind === 'StepSeq' && +seq.params.oct.choice >= 5) acts.push(K(seq.id, 'oct', stepDown(seq.params.oct), `${seq.name} an octave down, it was too high`));

@@ -5,7 +5,7 @@ const Panels = (() => {
   const BY_KIND = {
     Clock: 'clock', StepSeq: 'seq', Entropy: 'ent', Drums: 'drums', Analog: 'analog', Titan: 'titan', Chip: 'chip', Bodies: 'bodies',
     Geiger: 'geiger', Slope: 'serge', Fold: 'serge', VCFQ: 'serge', Mixer: 'mixer', Monitor: 'monitor',
-    Contour: 'contour', Swarm: 'swarm', Workout: 'workout', Grains: 'grains', Marbles: 'marbles', Toolbox: 'toolbox', Tape: 'tape'
+    Contour: 'contour', Swarm: 'swarm', Workout: 'workout', Grains: 'grains', Marbles: 'marbles', Toolbox: 'toolbox', Tape: 'tape', Reel: 'reel', LPG: 'lpg'
   };
   const LIGHT = new Set(['clock', 'seq', 'drums', 'mixer', 'grains', 'toolbox']);
   const SRC = {/*BUILD:PANELS*/};
