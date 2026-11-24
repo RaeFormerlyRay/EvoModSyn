@@ -1533,7 +1533,7 @@ const Mods = (() => {
   function Bodies(id) {
     const m = new M(id, { name: 'Bodies', sub: 'physical modeling resonator', width: 270, stripe: '#e8b04a', family: 'voice' });
     const bus = gain(1), out = gain(0.6); bus.connect(out);
-    m.p('model', { label: 'Body', steps: DSP.PM_MODELS, def: 0.2 });
+    m.p('model', { label: 'Body', steps: DSP.PM_MODELS, def: 0.4 }); // defaults to MARIMBA, not BELL
     m.p('bright', { label: 'Bright', def: 0.6, fmt: pct });
     m.p('decay', { label: 'Decay', def: 0.4, fmt: pct });
     m.p('pos', { label: 'Strike Pos', def: 0.3, fmt: pct });
@@ -4275,7 +4275,7 @@ Bass: root on the downbeat, fifths and octaves for movement, approach notes (a s
 Drums: intro hats/percussion only; verse kick+snare+hats; build four-on-the-floor kick with snare doubling from quarters to 8ths to 16ths; chorus everything plus open hats and a crash on the first downbeat; bridge half-time or sparse; fills on the last bar of a phrase.
 Builds: tension rises through density (snare roll, faster hats, 16th-note pedal bass), pitch (rising lines, filter opening), and space (more reverb and delay). Push-pull: right before the payoff, pull elements out (kick and bass drop for the last bar, a beat of near-silence), then push everything back in on the downbeat. Small push-pull waves inside sections (thin a bar, then bring it back) keep motion.
 Transitions: fill on the last bar, crash on the next downbeat, a reverb or delay throw on the last note. Final chorus lift: add a layer, open the filters further, optionally raise the key by 1-2 semitones.
-Sound design: avoid farty synths (buzzy square or pulse waves in the low register through a nearly closed resonant filter, short blatty envelopes, overdriven low notes; they pile up 120-450 Hz). Prefer saw or triangle for low parts, enough cutoff for a few harmonics, moderate resonance, decays long enough to sound like notes, a clean sub under a brighter layer.\nAvoid sameness: no part should loop unchanged for long. Lead lines need a change every 8 bars or so, arps every 12, bass and drums every 16 (techno and ambient can stretch this). Vary by developing the idea (answer phrase, inversion, rhythmic displacement, ghost notes, dropping or adding a part, filter movement), not by random noise.\nNever leave high-pitched, repeating sounds on: shrill arps up in the top octaves, whistling or screaming resonance, piercing bells, chirpy chip arps, constant hi-hat sizzle and geiger clicks grate on the ears within a few bars. Use them as brief accents (a fill, a build, one phrase) and then take them out, lower them an octave, darken them or bury them in the mix.\nMixing: the kick and drums are the anchor; the bass sits just under the kick (about 1-2 dB) and stays dry and centred; the lead or hook sits up front, about 3 dB under the drums; arps and counter-melodies tuck 6-8 dB behind the lead; pads, textures and noise sit 10-13 dB down, pushed back with reverb. Only one part owns the front at a time. Re-balance whenever the arrangement changes, because a part that was right in the verse can be too loud in the chorus.\nTwo layers: the rack holds two complete, independent modular systems (Layer A and Layer B). The song can live on one layer for some sections and crossfade to the other for contrast (for example verses on A, choruses on B, a bridge on either), fading one master up as the other fades down on the downbeat. Make the two layers clearly different in sound (voice models, kit, octave, effects) but in the same key and tempo.\nArrangement: give each part its own register (bass low, chords mid, lead high) and its own rhythmic space; not everything plays all the time.
+Sound design: NEVER use bell sounds of any kind (no Bodies BELL, GLASS or TUBE models, no Chip METAL wave, no bell-like FM tones); they ring over the mix and the listener hates them. Avoid farty synths (buzzy square or pulse waves in the low register through a nearly closed resonant filter, short blatty envelopes, overdriven low notes; they pile up 120-450 Hz). Prefer saw or triangle for low parts, enough cutoff for a few harmonics, moderate resonance, decays long enough to sound like notes, a clean sub under a brighter layer.\nAvoid sameness: no part should loop unchanged for long. Lead lines need a change every 8 bars or so, arps every 12, bass and drums every 16 (techno and ambient can stretch this). Vary by developing the idea (answer phrase, inversion, rhythmic displacement, ghost notes, dropping or adding a part, filter movement), not by random noise.\nNever leave high-pitched, repeating sounds on: shrill arps up in the top octaves, whistling or screaming resonance, piercing bells, chirpy chip arps, constant hi-hat sizzle and geiger clicks grate on the ears within a few bars. Use them as brief accents (a fill, a build, one phrase) and then take them out, lower them an octave, darken them or bury them in the mix.\nMixing: the kick and drums are the anchor; the bass sits just under the kick (about 1-2 dB) and stays dry and centred; the lead or hook sits up front, about 3 dB under the drums; arps and counter-melodies tuck 6-8 dB behind the lead; pads, textures and noise sit 10-13 dB down, pushed back with reverb. Only one part owns the front at a time. Re-balance whenever the arrangement changes, because a part that was right in the verse can be too loud in the chorus.\nTwo layers: the rack holds two complete, independent modular systems (Layer A and Layer B). The song can live on one layer for some sections and crossfade to the other for contrast (for example verses on A, choruses on B, a bridge on either), fading one master up as the other fades down on the downbeat. Make the two layers clearly different in sound (voice models, kit, octave, effects) but in the same key and tempo.\nArrangement: give each part its own register (bass low, chords mid, lead high) and its own rhythmic space; not everything plays all the time.
 Notation here: sequencer notes are scale degrees relative to the current chord when the sequencer's Harmony knob is SONG (0 root, 2 third, 4 fifth, 7 octave), so one pattern follows the chord progression.`;
 
   // ======================= SOUND-DESIGN GUARDRAILS =======================
@@ -4404,6 +4404,10 @@ const AI = (() => {
   };
   const MIXCH = { acid: 1, drums: 2, titan: 3, lead: 4, chip: 5, bodies: 6, vcfq: 7, fold: 7, geiger: 8 };
 
+  // Rae's rule: never any bell sounds. Bell-like settings the AI may not choose, from any source.
+  const BELLISH = { Bodies: { model: ['BELL', 'GLASS', 'TUBE'] }, Chip: { wave: ['METAL'] } };
+  const BANNED = (m, key, to) => !!BELLISH[m?.kind]?.[key]?.includes(String(to).toUpperCase());
+  A.BELLISH = BELLISH;
   async function run(a, h = 0) {
     const HU = UI.hand(h);
     if (A.abort) return;
@@ -4413,6 +4417,7 @@ const AI = (() => {
         case 'knob': {
           const m = E.mods[a.mod], p = m?.params[a.key];
           if (!p) { A.log('err', `skipped unknown knob ${esc(a.mod)}.${esc(a.key)}`); break; }
+          if (BANNED(m, a.key, a.to)) { a = { ...a, to: m.kind === 'Chip' ? 'P25' : 'MARIMBA' }; A.log('sys', `no bells: ${esc(m.name)} gets ${a.to} instead`); }
           const n = normFor(p, a.to); if (n == null) { A.log('err', `skipped ${esc(a.mod)}.${esc(a.key)}: bad value`); break; }
           if (Math.abs(n - p.n) < 0.004) break;
           const before = p.display();
@@ -4693,7 +4698,7 @@ const AI = (() => {
         acts.push(K(id, 'cutoff', clamp(m.params.cutoff.n + 0.08 + rnd() * 0.08), 'a little brighter'));
       }
       if (m.kind === 'Titan' && out(id)) acts.push(K(id, 'cut', clamp(m.params.cut.n + 0.1), 'open the bass up'));
-      if (m.kind === 'Bodies' && out(id)) acts.push(K(id, 'model', pick(m.params.model.steps.filter(x => x !== m.params.model.choice)), 'a different body'));
+      if (m.kind === 'Bodies' && out(id)) acts.push(K(id, 'model', pick(['MARIMBA', 'STRING', 'MEMBRANE'].filter(x => x !== m.params.model.choice)), 'a different body'));
       if (m.kind === 'StepSeq' && E.cablesFrom(id, 'NOTE').length && +m.params.oct.choice >= 3 && +m.params.oct.choice <= 3 && rnd() < 0.5) acts.push(K(id, 'oct', '4', 'lift the line an octave on this layer'));
     }
     if (E.mods.drums && routed('drums')) acts.push(K('drums', 'kit', pick(Mods.KITS.filter(k => k !== E.mods.drums.params.kit.choice)), 'a different kit for this layer'), K('drums', 'drive', clamp(E.mods.drums.params.drive.n + 0.1), 'a bit more punch'));
@@ -5056,11 +5061,11 @@ const AI = (() => {
   const RECIPES = {
     acid: p => ({ bpm: 128 + Math.round(rnd() * 8), kit: '909', acts: [...L.drums(p, 'acid', '909'), ...L.acid(p), ...L.workoutDrums('RS', '1/16', 5, 0.85), ...(cha(p) > 0.45 || agg(p) > 0.6 ? L.geiger(p) : []), ...(p.mode === 'perform' ? L.slopeTo('acid.CUT') : [])] }),
     dubstep: p => ({ bpm: 140, acts: [...L.drums(p, 'half', '909'), ...L.titan(p, true), ...L.workoutDrums('CH', '1/16T', 7, 0.6), ...(cha(p) > 0.45 ? [...L.geiger(p), ...L.geigerDrums()] : [])] }),
-    dnb: p => ({ bpm: 172, acts: [...L.drums(p, 'dnb', '909'), ...L.titan(p, false, 'reese'), ...(rnd() < 0.35 ? L.bodies(p, 'GLASS', 4) : L.reelLayer(p, pick(['STRINGS', 'CHOIR', 'CELLO']))), ...L.swarmTo(['titan.CUT'], '1 BAR')] }),
+    dnb: p => ({ bpm: 172, acts: [...L.drums(p, 'dnb', '909'), ...L.titan(p, false, 'reese'), ...(rnd() < 0.35 ? L.bodies(p, 'STRING', 4) : L.reelLayer(p, pick(['STRINGS', 'CHOIR', 'CELLO']))), ...L.swarmTo(['titan.CUT'], '1 BAR')] }),
     techno: p => ({ bpm: 130, acts: [...L.drums(p, 'techno', '909'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'decay', 0.2), ...L.bodies(p, 'MEMBRANE', 1), ...L.slopeTo('acid.CUT'), ...L.workoutDrums(pick(['RS', 'LT', 'CP']), '1/16', 3, 0.9), ...L.grainsOn('bodies', { size: 0.45, dens: 0.4, level: 0.35, send: 0.5 })] }),
     house: p => ({ bpm: 124, acts: [...L.drums(p, 'house', '909'), ...L.lead(p, 'JOVE'), ...L.contourEnv('lead', 'seq2.GATE'), K('lead', 'cutoff', 0.35, 'closed down so the envelope plucks it'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'res', 0.3)] }),
     chip: p => ({ bpm: 150, acts: [...L.drums(p, 'chip', 'LOFI'), ...L.chip(p), ...L.lead(p, 'SEM'), K('seq2', 'oct', 1)] }),
-    ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, pick(['MARIMBA', 'GLASS', 'STRING', 'TUBE']), 4), ...L.slopeTo('lead.CUT'), ...L.grainsOn('bodies', { size: 0.85, dens: 0.6, pitch: '+12', spray: 0.6, fb: 0.35, level: 0.55, send: 0.7 }), ...(rnd() < 0.6 ? L.reelLayer(p, pick(['CHOIR', 'STRINGS', 'FLUTE'])) : []), ...L.swarmTo(['grains.POS', 'grains.DENS'], '4 BAR'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
+    ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, pick(['MARIMBA', 'STRING']), 4), ...L.slopeTo('lead.CUT'), ...L.grainsOn('bodies', { size: 0.85, dens: 0.6, pitch: '+12', spray: 0.6, fb: 0.35, level: 0.55, send: 0.7 }), ...(rnd() < 0.6 ? L.reelLayer(p, pick(['CHOIR', 'STRINGS', 'FLUTE'])) : []), ...L.swarmTo(['grains.POS', 'grains.DENS'], '4 BAR'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
     noise: p => ({ bpm: 145, acts: [...L.drums(p, 'noise', 'DIRT'), ...L.geiger(p), ...L.geigerDrums(), ...L.titan(p, true), K('titan', 't1', 'METAL'), P('ent.CV', 'titan.CUT', 'random voltages tear at the bass filter'), P('clock.CLK', 'ent.CLK'), ...L.shTo('fold.FOLD', 'geiger.TRIG'), ...L.grainsOn('titan', { size: 0.3, dens: 0.8, pitch: '-12', spray: 0.8, fb: 0.5, level: 0.4, send: 0.2 })] }),
     trap: p => ({ bpm: 140, acts: [...L.drums(p, 'trap', '808'), K('drums', 'decay', 0.9), K('drums', 'tune', 0.35), ...L.lead(p, 'PROPHECY'), ...L.workoutDrums('CH', '1/32', 11, 0.55)] }),
     experimental: p => ({ bpm: 100, acts: [...L.bodies(p, 'STRING', 1), ...L.geiger(p), P('geiger.TRIG', 'slope.TRIG'), K('slope', 'cycle', 'OFF'), P('ent.CV', 'fold.FOLD', 'noise CV animates the folds'), ...L.chip(p), K('chip', 'wave', 'METAL'), K('mixer', 'l5', 0.35), ...L.marblesLayer(p, 'lead'), K('lead', 'model', 'PROPHECY'), ...L.contourEnv('lead', 'marbles.T1'), K('contour', 'cy2', 'ON'), P('contour.OUT2', 'vcfq.CV', 'cycling function sweeps the filter'), ...L.shTo('lead.FM', 'marbles.T3')] })
@@ -5127,13 +5132,13 @@ const AI = (() => {
     experimental: ['Bodies', 'Chip', 'Analog:PROPHECY', 'Reel', 'Titan'], default: ['Analog:PROPHECY', 'Bodies', 'Chip', 'Analog:SEM', 'Reel', 'Titan', 'Analog:ODYSSEY']
   };
   // ----- variety: remember which instruments the AI has leaned on lately and favour the ones it has not -----
-  const NEWER = { Reel: 1.8, Titan: 1.3, Chip: 1.1, Bodies: 0.55 }; // the bells were overused: Bodies is picked less on purpose
+  const NEWER = { Reel: 1.8, Titan: 1.3, Chip: 1.1, Bodies: 0.45 }; // Bodies is picked less on purpose (and never as a bell)
   let usage = {}; try { usage = JSON.parse(localStorage.getItem('patchmind.usage') || '{}'); } catch (e) { /* no storage */ }
   const fresh = list => wpick(list.map(k => [k, (NEWER[k.split(':')[0]] ?? 1) / (1 + (usage[k] || 0) * 0.9)]));
   const used = k => { for (const x in usage) usage[x] *= 0.93; usage[k] = (usage[k] || 0) + 1; try { localStorage.setItem('patchmind.usage', JSON.stringify(usage)); } catch (e) { /* no storage */ } };
   A.usage = () => usage;
-  // physical-model bodies: bells only now and then
-  const bodyModel = () => wpick([['MARIMBA', 3], ['STRING', 3], ['MEMBRANE', 2], ['GLASS', 2], ['TUBE', 2], ['BELL', 0.6]]);
+  // physical-model bodies: Rae never wants bell sounds, so the bell-like bodies (BELL, GLASS, TUBE) are banned outright
+  const bodyModel = () => wpick([['MARIMBA', 3], ['STRING', 3], ['MEMBRANE', 2]]);
   // A brand-new layer: add a sequencer and a voice module, patch them, write patterns and a song
   function newLayer(p, reserved, songOn) {
     const spec = fresh(LAYERS[p.genre] || LAYERS.default), [type, model] = spec.split(':'); used(spec);
@@ -5546,7 +5551,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       const fast = t.match(/faster|slower/i); if (fast) await run(nudge('clock', 'bpm', /faster/i.test(t) ? 0.06 : -0.06, fast[0]));
       if (/geiger|radiation/i.test(t)) await runAll(L.geiger(p));
       if (/chip|8.?bit/i.test(t)) await runAll([P('clock.CLK', 'ent.CLK'), P('ent.NOTE', 'chip.NOTE'), { do: 'route', mod: 'chip', level: 0.5, send: 0.3 }]);
-      if (/bell|string|marimba|physical/i.test(t)) await runAll(L.bodies(p, /string/i.test(t) ? 'STRING' : /marimba/i.test(t) ? 'MARIMBA' : /bell/i.test(t) ? 'BELL' : bodyModel()));
+      if (/bell|string|marimba|physical/i.test(t)) await runAll(L.bodies(p, /string/i.test(t) ? 'STRING' : /marimba/i.test(t) ? 'MARIMBA' : bodyModel()));
       { const fxw = fxWords(t); if (fxw.length) await runAll(fxw); }
       if (/lfo|modulat|movement|wobble|evolv|massive|performer|chaos|attractor|macro/i.test(t)) await runAll(L.modPack(p, { kind: /performer|wobble/i.test(t) ? 'Performer' : /chaos|attractor/i.test(t) ? 'Attractor' : null, drama: /dramatic|extreme|wild|heavy/i.test(t) ? 1 : /subtle|gentle|slight/i.test(t) ? 0 : null }));
       if (/wobble|dubstep|bass/i.test(t) && !routed('titan')) await runAll(L.titan(p, true));
@@ -6170,6 +6175,9 @@ const Critic = (() => {
     else if (lowEnd < 0.08 && AI.routed('drums')) { notWorking.push('no weight in the low end'); fixes.push(nudge('drums', 'tune', -0.08, 'deeper kick')); }
     else working.push('balanced low end');
     if (M.high > 0.32 && M.centroidHz > 4200) { notWorking.push(`harsh top end (centre of mass ${M.centroidHz} Hz)`); const vc = AI.voiceCut(); if (vc.length) { const [m, k] = vc[0]; fixes.push(nudge(m, k, -0.12, 'too harsh')); } }
+    // 5a. bells: never wanted
+    E.order.filter(id => AI.routed(id) && AI.BELLISH?.[E.mods[id].kind]).forEach(id => { const m = E.mods[id];
+      for (const [k, bad] of Object.entries(AI.BELLISH[m.kind])) if (bad.includes(m.params[k]?.choice)) { notWorking.push(`${m.name} sounds like a bell`); fixes.push(K(id, k, m.kind === 'Chip' ? 'P25' : 'MARIMBA', 'no bells, ever')); } });
     // 5b. farty: a buzzy pile-up between 120 and 450 Hz with nothing bright on top
     const fart = Theory.unfart();
     if (M.lowMid > 0.5 && M.centroidHz < 900) { notWorking.push(`farty low-mid buzz: ${Math.round(M.lowMid * 100)}% of the energy sits between 120 and 450 Hz`); fixes.push(...fart); if (!fart.length) { const vc = AI.voiceCut(); if (vc.length) { const [m, k] = vc[0]; fixes.push(nudge(m, k, 0.1, 'let some harmonics through so the low end is not a blur')); } } }
@@ -6204,6 +6212,7 @@ ${seqLines}
 CABLES: ${cables}
 PER-CHANNEL BALANCE (loudness-weighted, against where each kind of part should sit: drums anchor, bass just under, lead up front, arps behind, textures buried):
 ${typeof Mix !== 'undefined' ? Mix.describe() : 'n/a'}
+Never allow bell sounds: if any Bodies module uses BELL, GLASS or TUBE, or a Chip uses the METAL wave, switch it to MARIMBA/STRING (Bodies) or P25 (Chip). The listener hates bells.
 Also judge the mix (parts too loud or too quiet: fix with mixer lN knobs) and any high-pitched, repeating sound left on too long (darken it, lower its octave or take it out).
 RECENT AI ACTIONS:
 ${recent || 'none'}
@@ -7358,8 +7367,8 @@ const Layers = (() => {
   };
 
   // ----- console -----
-  const TASKS = ['Design an acid bass patch', 'Play a full 15 minute acid live performance', 'Design a dubstep wobble bass', 'Play a 5 minute noise set with the geiger counter', 'Make a chiptune groove', 'Design an ambient bell soundscape', 'Make it darker', 'Add the geiger counter'];
-  const PERSONAS = ['You are a noise musician who loves aggressive, hard hitting EDM', 'You are a patient minimal techno producer', 'You are a gentle ambient composer who loves bells', 'You are a chaotic Serge-system experimentalist', 'You are a retro game composer who loves happy melodies'];
+  const TASKS = ['Design an acid bass patch', 'Play a full 15 minute acid live performance', 'Design a dubstep wobble bass', 'Play a 5 minute noise set with the geiger counter', 'Make a chiptune groove', 'Design an ambient marimba soundscape', 'Make it darker', 'Add the geiger counter'];
+  const PERSONAS = ['You are a noise musician who loves aggressive, hard hitting EDM', 'You are a patient minimal techno producer', 'You are a gentle ambient composer who loves soft, warm textures', 'You are a chaotic Serge-system experimentalist', 'You are a retro game composer who loves happy melodies'];
   const chipRow = (el, list, target) => list.forEach(t => { const b = document.createElement('button'); b.className = 'chip'; b.type = 'button'; b.textContent = t; b.onclick = () => { $(target).value = t; }; $(el).append(b); });
   chipRow('#taskchips', TASKS, '#task'); chipRow('#personachips', PERSONAS, '#persona');
   try { const s = localStorage.getItem('patchmind.persona'); if (s) $('#persona').value = s; } catch (e) { /* no storage */ }

@@ -96,6 +96,10 @@ const AI = (() => {
   };
   const MIXCH = { acid: 1, drums: 2, titan: 3, lead: 4, chip: 5, bodies: 6, vcfq: 7, fold: 7, geiger: 8 };
 
+  // Rae's rule: never any bell sounds. Bell-like settings the AI may not choose, from any source.
+  const BELLISH = { Bodies: { model: ['BELL', 'GLASS', 'TUBE'] }, Chip: { wave: ['METAL'] } };
+  const BANNED = (m, key, to) => !!BELLISH[m?.kind]?.[key]?.includes(String(to).toUpperCase());
+  A.BELLISH = BELLISH;
   async function run(a, h = 0) {
     const HU = UI.hand(h);
     if (A.abort) return;
@@ -105,6 +109,7 @@ const AI = (() => {
         case 'knob': {
           const m = E.mods[a.mod], p = m?.params[a.key];
           if (!p) { A.log('err', `skipped unknown knob ${esc(a.mod)}.${esc(a.key)}`); break; }
+          if (BANNED(m, a.key, a.to)) { a = { ...a, to: m.kind === 'Chip' ? 'P25' : 'MARIMBA' }; A.log('sys', `no bells: ${esc(m.name)} gets ${a.to} instead`); }
           const n = normFor(p, a.to); if (n == null) { A.log('err', `skipped ${esc(a.mod)}.${esc(a.key)}: bad value`); break; }
           if (Math.abs(n - p.n) < 0.004) break;
           const before = p.display();
@@ -385,7 +390,7 @@ const AI = (() => {
         acts.push(K(id, 'cutoff', clamp(m.params.cutoff.n + 0.08 + rnd() * 0.08), 'a little brighter'));
       }
       if (m.kind === 'Titan' && out(id)) acts.push(K(id, 'cut', clamp(m.params.cut.n + 0.1), 'open the bass up'));
-      if (m.kind === 'Bodies' && out(id)) acts.push(K(id, 'model', pick(m.params.model.steps.filter(x => x !== m.params.model.choice)), 'a different body'));
+      if (m.kind === 'Bodies' && out(id)) acts.push(K(id, 'model', pick(['MARIMBA', 'STRING', 'MEMBRANE'].filter(x => x !== m.params.model.choice)), 'a different body'));
       if (m.kind === 'StepSeq' && E.cablesFrom(id, 'NOTE').length && +m.params.oct.choice >= 3 && +m.params.oct.choice <= 3 && rnd() < 0.5) acts.push(K(id, 'oct', '4', 'lift the line an octave on this layer'));
     }
     if (E.mods.drums && routed('drums')) acts.push(K('drums', 'kit', pick(Mods.KITS.filter(k => k !== E.mods.drums.params.kit.choice)), 'a different kit for this layer'), K('drums', 'drive', clamp(E.mods.drums.params.drive.n + 0.1), 'a bit more punch'));
@@ -748,11 +753,11 @@ const AI = (() => {
   const RECIPES = {
     acid: p => ({ bpm: 128 + Math.round(rnd() * 8), kit: '909', acts: [...L.drums(p, 'acid', '909'), ...L.acid(p), ...L.workoutDrums('RS', '1/16', 5, 0.85), ...(cha(p) > 0.45 || agg(p) > 0.6 ? L.geiger(p) : []), ...(p.mode === 'perform' ? L.slopeTo('acid.CUT') : [])] }),
     dubstep: p => ({ bpm: 140, acts: [...L.drums(p, 'half', '909'), ...L.titan(p, true), ...L.workoutDrums('CH', '1/16T', 7, 0.6), ...(cha(p) > 0.45 ? [...L.geiger(p), ...L.geigerDrums()] : [])] }),
-    dnb: p => ({ bpm: 172, acts: [...L.drums(p, 'dnb', '909'), ...L.titan(p, false, 'reese'), ...(rnd() < 0.35 ? L.bodies(p, 'GLASS', 4) : L.reelLayer(p, pick(['STRINGS', 'CHOIR', 'CELLO']))), ...L.swarmTo(['titan.CUT'], '1 BAR')] }),
+    dnb: p => ({ bpm: 172, acts: [...L.drums(p, 'dnb', '909'), ...L.titan(p, false, 'reese'), ...(rnd() < 0.35 ? L.bodies(p, 'STRING', 4) : L.reelLayer(p, pick(['STRINGS', 'CHOIR', 'CELLO']))), ...L.swarmTo(['titan.CUT'], '1 BAR')] }),
     techno: p => ({ bpm: 130, acts: [...L.drums(p, 'techno', '909'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'decay', 0.2), ...L.bodies(p, 'MEMBRANE', 1), ...L.slopeTo('acid.CUT'), ...L.workoutDrums(pick(['RS', 'LT', 'CP']), '1/16', 3, 0.9), ...L.grainsOn('bodies', { size: 0.45, dens: 0.4, level: 0.35, send: 0.5 })] }),
     house: p => ({ bpm: 124, acts: [...L.drums(p, 'house', '909'), ...L.lead(p, 'JOVE'), ...L.contourEnv('lead', 'seq2.GATE'), K('lead', 'cutoff', 0.35, 'closed down so the envelope plucks it'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'res', 0.3)] }),
     chip: p => ({ bpm: 150, acts: [...L.drums(p, 'chip', 'LOFI'), ...L.chip(p), ...L.lead(p, 'SEM'), K('seq2', 'oct', 1)] }),
-    ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, pick(['MARIMBA', 'GLASS', 'STRING', 'TUBE']), 4), ...L.slopeTo('lead.CUT'), ...L.grainsOn('bodies', { size: 0.85, dens: 0.6, pitch: '+12', spray: 0.6, fb: 0.35, level: 0.55, send: 0.7 }), ...(rnd() < 0.6 ? L.reelLayer(p, pick(['CHOIR', 'STRINGS', 'FLUTE'])) : []), ...L.swarmTo(['grains.POS', 'grains.DENS'], '4 BAR'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
+    ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, pick(['MARIMBA', 'STRING']), 4), ...L.slopeTo('lead.CUT'), ...L.grainsOn('bodies', { size: 0.85, dens: 0.6, pitch: '+12', spray: 0.6, fb: 0.35, level: 0.55, send: 0.7 }), ...(rnd() < 0.6 ? L.reelLayer(p, pick(['CHOIR', 'STRINGS', 'FLUTE'])) : []), ...L.swarmTo(['grains.POS', 'grains.DENS'], '4 BAR'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
     noise: p => ({ bpm: 145, acts: [...L.drums(p, 'noise', 'DIRT'), ...L.geiger(p), ...L.geigerDrums(), ...L.titan(p, true), K('titan', 't1', 'METAL'), P('ent.CV', 'titan.CUT', 'random voltages tear at the bass filter'), P('clock.CLK', 'ent.CLK'), ...L.shTo('fold.FOLD', 'geiger.TRIG'), ...L.grainsOn('titan', { size: 0.3, dens: 0.8, pitch: '-12', spray: 0.8, fb: 0.5, level: 0.4, send: 0.2 })] }),
     trap: p => ({ bpm: 140, acts: [...L.drums(p, 'trap', '808'), K('drums', 'decay', 0.9), K('drums', 'tune', 0.35), ...L.lead(p, 'PROPHECY'), ...L.workoutDrums('CH', '1/32', 11, 0.55)] }),
     experimental: p => ({ bpm: 100, acts: [...L.bodies(p, 'STRING', 1), ...L.geiger(p), P('geiger.TRIG', 'slope.TRIG'), K('slope', 'cycle', 'OFF'), P('ent.CV', 'fold.FOLD', 'noise CV animates the folds'), ...L.chip(p), K('chip', 'wave', 'METAL'), K('mixer', 'l5', 0.35), ...L.marblesLayer(p, 'lead'), K('lead', 'model', 'PROPHECY'), ...L.contourEnv('lead', 'marbles.T1'), K('contour', 'cy2', 'ON'), P('contour.OUT2', 'vcfq.CV', 'cycling function sweeps the filter'), ...L.shTo('lead.FM', 'marbles.T3')] })
@@ -819,13 +824,13 @@ const AI = (() => {
     experimental: ['Bodies', 'Chip', 'Analog:PROPHECY', 'Reel', 'Titan'], default: ['Analog:PROPHECY', 'Bodies', 'Chip', 'Analog:SEM', 'Reel', 'Titan', 'Analog:ODYSSEY']
   };
   // ----- variety: remember which instruments the AI has leaned on lately and favour the ones it has not -----
-  const NEWER = { Reel: 1.8, Titan: 1.3, Chip: 1.1, Bodies: 0.55 }; // the bells were overused: Bodies is picked less on purpose
+  const NEWER = { Reel: 1.8, Titan: 1.3, Chip: 1.1, Bodies: 0.45 }; // Bodies is picked less on purpose (and never as a bell)
   let usage = {}; try { usage = JSON.parse(localStorage.getItem('patchmind.usage') || '{}'); } catch (e) { /* no storage */ }
   const fresh = list => wpick(list.map(k => [k, (NEWER[k.split(':')[0]] ?? 1) / (1 + (usage[k] || 0) * 0.9)]));
   const used = k => { for (const x in usage) usage[x] *= 0.93; usage[k] = (usage[k] || 0) + 1; try { localStorage.setItem('patchmind.usage', JSON.stringify(usage)); } catch (e) { /* no storage */ } };
   A.usage = () => usage;
-  // physical-model bodies: bells only now and then
-  const bodyModel = () => wpick([['MARIMBA', 3], ['STRING', 3], ['MEMBRANE', 2], ['GLASS', 2], ['TUBE', 2], ['BELL', 0.6]]);
+  // physical-model bodies: Rae never wants bell sounds, so the bell-like bodies (BELL, GLASS, TUBE) are banned outright
+  const bodyModel = () => wpick([['MARIMBA', 3], ['STRING', 3], ['MEMBRANE', 2]]);
   // A brand-new layer: add a sequencer and a voice module, patch them, write patterns and a song
   function newLayer(p, reserved, songOn) {
     const spec = fresh(LAYERS[p.genre] || LAYERS.default), [type, model] = spec.split(':'); used(spec);
@@ -1238,7 +1243,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       const fast = t.match(/faster|slower/i); if (fast) await run(nudge('clock', 'bpm', /faster/i.test(t) ? 0.06 : -0.06, fast[0]));
       if (/geiger|radiation/i.test(t)) await runAll(L.geiger(p));
       if (/chip|8.?bit/i.test(t)) await runAll([P('clock.CLK', 'ent.CLK'), P('ent.NOTE', 'chip.NOTE'), { do: 'route', mod: 'chip', level: 0.5, send: 0.3 }]);
-      if (/bell|string|marimba|physical/i.test(t)) await runAll(L.bodies(p, /string/i.test(t) ? 'STRING' : /marimba/i.test(t) ? 'MARIMBA' : /bell/i.test(t) ? 'BELL' : bodyModel()));
+      if (/bell|string|marimba|physical/i.test(t)) await runAll(L.bodies(p, /string/i.test(t) ? 'STRING' : /marimba/i.test(t) ? 'MARIMBA' : bodyModel()));
       { const fxw = fxWords(t); if (fxw.length) await runAll(fxw); }
       if (/lfo|modulat|movement|wobble|evolv|massive|performer|chaos|attractor|macro/i.test(t)) await runAll(L.modPack(p, { kind: /performer|wobble/i.test(t) ? 'Performer' : /chaos|attractor/i.test(t) ? 'Attractor' : null, drama: /dramatic|extreme|wild|heavy/i.test(t) ? 1 : /subtle|gentle|slight/i.test(t) ? 0 : null }));
       if (/wobble|dubstep|bass/i.test(t) && !routed('titan')) await runAll(L.titan(p, true));

@@ -570,7 +570,7 @@ const Mods = (() => {
   function Bodies(id) {
     const m = new M(id, { name: 'Bodies', sub: 'physical modeling resonator', width: 270, stripe: '#e8b04a', family: 'voice' });
     const bus = gain(1), out = gain(0.6); bus.connect(out);
-    m.p('model', { label: 'Body', steps: DSP.PM_MODELS, def: 0.2 });
+    m.p('model', { label: 'Body', steps: DSP.PM_MODELS, def: 0.4 }); // defaults to MARIMBA, not BELL
     m.p('bright', { label: 'Bright', def: 0.6, fmt: pct });
     m.p('decay', { label: 'Decay', def: 0.4, fmt: pct });
     m.p('pos', { label: 'Strike Pos', def: 0.3, fmt: pct });

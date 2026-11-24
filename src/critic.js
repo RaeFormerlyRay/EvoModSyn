@@ -144,6 +144,9 @@ const Critic = (() => {
     else if (lowEnd < 0.08 && AI.routed('drums')) { notWorking.push('no weight in the low end'); fixes.push(nudge('drums', 'tune', -0.08, 'deeper kick')); }
     else working.push('balanced low end');
     if (M.high > 0.32 && M.centroidHz > 4200) { notWorking.push(`harsh top end (centre of mass ${M.centroidHz} Hz)`); const vc = AI.voiceCut(); if (vc.length) { const [m, k] = vc[0]; fixes.push(nudge(m, k, -0.12, 'too harsh')); } }
+    // 5a. bells: never wanted
+    E.order.filter(id => AI.routed(id) && AI.BELLISH?.[E.mods[id].kind]).forEach(id => { const m = E.mods[id];
+      for (const [k, bad] of Object.entries(AI.BELLISH[m.kind])) if (bad.includes(m.params[k]?.choice)) { notWorking.push(`${m.name} sounds like a bell`); fixes.push(K(id, k, m.kind === 'Chip' ? 'P25' : 'MARIMBA', 'no bells, ever')); } });
     // 5b. farty: a buzzy pile-up between 120 and 450 Hz with nothing bright on top
     const fart = Theory.unfart();
     if (M.lowMid > 0.5 && M.centroidHz < 900) { notWorking.push(`farty low-mid buzz: ${Math.round(M.lowMid * 100)}% of the energy sits between 120 and 450 Hz`); fixes.push(...fart); if (!fart.length) { const vc = AI.voiceCut(); if (vc.length) { const [m, k] = vc[0]; fixes.push(nudge(m, k, 0.1, 'let some harmonics through so the low end is not a blur')); } } }
@@ -178,6 +181,7 @@ ${seqLines}
 CABLES: ${cables}
 PER-CHANNEL BALANCE (loudness-weighted, against where each kind of part should sit: drums anchor, bass just under, lead up front, arps behind, textures buried):
 ${typeof Mix !== 'undefined' ? Mix.describe() : 'n/a'}
+Never allow bell sounds: if any Bodies module uses BELL, GLASS or TUBE, or a Chip uses the METAL wave, switch it to MARIMBA/STRING (Bodies) or P25 (Chip). The listener hates bells.
 Also judge the mix (parts too loud or too quiet: fix with mixer lN knobs) and any high-pitched, repeating sound left on too long (darken it, lower its octave or take it out).
 RECENT AI ACTIONS:
 ${recent || 'none'}

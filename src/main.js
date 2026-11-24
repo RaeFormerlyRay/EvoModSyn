@@ -92,8 +92,8 @@
   };
 
   // ----- console -----
-  const TASKS = ['Design an acid bass patch', 'Play a full 15 minute acid live performance', 'Design a dubstep wobble bass', 'Play a 5 minute noise set with the geiger counter', 'Make a chiptune groove', 'Design an ambient bell soundscape', 'Make it darker', 'Add the geiger counter'];
-  const PERSONAS = ['You are a noise musician who loves aggressive, hard hitting EDM', 'You are a patient minimal techno producer', 'You are a gentle ambient composer who loves bells', 'You are a chaotic Serge-system experimentalist', 'You are a retro game composer who loves happy melodies'];
+  const TASKS = ['Design an acid bass patch', 'Play a full 15 minute acid live performance', 'Design a dubstep wobble bass', 'Play a 5 minute noise set with the geiger counter', 'Make a chiptune groove', 'Design an ambient marimba soundscape', 'Make it darker', 'Add the geiger counter'];
+  const PERSONAS = ['You are a noise musician who loves aggressive, hard hitting EDM', 'You are a patient minimal techno producer', 'You are a gentle ambient composer who loves soft, warm textures', 'You are a chaotic Serge-system experimentalist', 'You are a retro game composer who loves happy melodies'];
   const chipRow = (el, list, target) => list.forEach(t => { const b = document.createElement('button'); b.className = 'chip'; b.type = 'button'; b.textContent = t; b.onclick = () => { $(target).value = t; }; $(el).append(b); });
   chipRow('#taskchips', TASKS, '#task'); chipRow('#personachips', PERSONAS, '#persona');
   try { const s = localStorage.getItem('patchmind.persona'); if (s) $('#persona').value = s; } catch (e) { /* no storage */ }
