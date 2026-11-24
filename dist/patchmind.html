@@ -734,8 +734,16 @@ const Engine = (() => {
   // screen, which is also the one the hands work on. E.within(L, fn) runs fn with layer L in context.
   E.out = ctx.createGain(); E.out.connect(ctx.destination);
   E.outAn = ctx.createAnalyser(); E.outAn.fftSize = 2048; E.outAn.smoothingTimeConstant = 0.6; E.out.connect(E.outAn);
-  const mkLayer = i => { const bus = ctx.createGain(); bus.gain.value = i ? 0 : 1; bus.connect(E.out); return { i, name: 'AB'[i], mods: {}, order: [], cables: [], harmony: [], bus, level: i ? 0 : 1 }; };
+  // Each layer has a master bus and a silent sink. Every analyser (meters, displays, CV readers) also feeds its
+  // layer's sink, so a layer's whole audio graph hangs off its bus. A layer that has been faded all the way out
+  // goes to sleep: its bus is unplugged from the output and the browser stops computing any of its audio.
+  const mkLayer = i => { const bus = ctx.createGain(), sink = ctx.createGain(); bus.gain.value = i ? 0 : 1; sink.gain.value = 0; sink.connect(bus); if (!i) bus.connect(E.out);
+    return { i, name: 'AB'[i], mods: {}, order: [], cables: [], harmony: [], bus, sink, level: i ? 0 : 1, awake: !i, sleepT: 0 }; };
   E.layers = [mkLayer(0), mkLayer(1)]; E.L = 0; E.V = 0;
+  { const ca = ctx.createAnalyser.bind(ctx); ctx.createAnalyser = (...a) => { const n = ca(...a); if (E._collect) n.connect(E.layers[E.L].sink); return n; }; } // only analysers inside modules (never one on the master)
+  E.wakeLayer = L => { const Ly = E.layers[L]; clearTimeout(Ly.sleepT); if (!Ly.awake) { Ly.bus.connect(E.out); Ly.awake = true; E.fire('layersleep', { L, asleep: false }); } };
+  const sleepLater = (L, ms) => { const Ly = E.layers[L]; clearTimeout(Ly.sleepT);
+    Ly.sleepT = setTimeout(() => { if (Ly.level < 1e-4 && Ly.awake) { Ly.bus.disconnect(); Ly.awake = false; E.fire('layersleep', { L, asleep: true }); } }, ms); };
   ['mods', 'order', 'cables', 'harmony'].forEach(k => Object.defineProperty(E, k, { get: () => E.layers[E.L][k], set: v => { E.layers[E.L][k] = v; } }));
   E.within = (L, fn) => { const o = E.L; E.L = L; try { return fn(); } finally { E.L = o; } };
   E.hasLayer = L => E.layers[L].order.length > 0;
@@ -744,8 +752,10 @@ const Engine = (() => {
   E.fadeLayer = (L, to, sec = 0.05, at) => {
     const g = E.layers[L].bus.gain, now = ctx.currentTime, t = Math.max(now, at ?? now);
     if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(t); else { g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); }
+    if (to > 1e-4) E.wakeLayer(L);
     g.linearRampToValueAtTime(to, t + Math.max(0.01, sec));
     E.layers[L].level = to;
+    if (to <= 1e-4) sleepLater(L, (t - now + Math.max(0.01, sec)) * 1000 + 1500);
     E.fire('layerfade', { L, to, sec, at: t });
   };
   // Record every source node a module starts while it is being built, so the module can be removed cleanly later
@@ -864,13 +874,12 @@ const Engine = (() => {
   // ---------- Knob modulation ----------
   // Any continuous knob can take a cable on its own (Massive-style): the cable lands on input "@key", whose gain is
   // the modulation depth. The signal is read ~40 times a second and added on top of where the knob sits.
-  const modSink = ctx.createGain(); modSink.gain.value = 0; modSink.connect(ctx.destination);
   E.modIn = (id, key) => {
     const m = E.mods[id], p = m?.params[key]; if (!p || !p.canMod) return null;
     const name = '@' + key;
     if (!m.ins[name]) {
       const g = ctx.createGain(), an = ctx.createAnalyser(); g.gain.value = p.modDepth; an.fftSize = 32;
-      g.connect(an); an.connect(modSink);
+      g.connect(an); an.connect(E.layers[E.L].sink); // reaches the speakers through its layer's sink
       m.ins[name] = { kind: 'sig', jt: 'cv', node: g, an, buf: new Float32Array(32), key, knob: true, desc: `modulates ${p.label}` };
     }
     return m.ins[name];
@@ -1646,10 +1655,10 @@ const ModX = (() => {
   const constSrc = (v = 0) => { const c = ctx.createConstantSource(); c.offset.value = v; c.start(); return c; };
   const gain = (v = 1) => { const g = ctx.createGain(); g.gain.value = v; return g; };
   // A silent path to the speakers keeps analysers and script processors running in every browser
-  const sink = gain(0); sink.connect(ctx.destination);
+  const sink = () => E.layers[E.L].sink; // silent path to the speakers through the layer being built
   // Read the current value of a signal (lets CV inputs steer things that are scheduled in JavaScript)
   function reader(node) {
-    const an = ctx.createAnalyser(); an.fftSize = 32; node.connect(an); an.connect(sink);
+    const an = ctx.createAnalyser(); an.fftSize = 32; node.connect(an);
     const buf = new Float32Array(32);
     return () => { an.getFloatTimeDomainData(buf); return buf[31]; };
   }
@@ -1798,7 +1807,7 @@ const ModX = (() => {
     inp.connect(rec); inp.connect(dry); dry.connect(out);
     wetBus.connect(sat); sat.connect(wet); wet.connect(out); sat.connect(fb); fb.connect(rec);
     const sp = ctx.createScriptProcessor(2048, 1, 1);
-    rec.connect(sp); sp.connect(sink);
+    rec.connect(sp); sp.connect(sink());
     m.frozen = false;
     sp.onaudioprocess = ev => {
       if (m.disposed) { sp.onaudioprocess = null; try { sp.disconnect(); rec.disconnect(); } catch (e) { /* gone */ } return; }
@@ -2878,7 +2887,7 @@ const LFO = (() => {
     const inp = gain(1), pre = gain(2), r = ctx.createWaveShaper(), lp = ctx.createBiquadFilter(), env = gain(1), inv = gain(-1), one = constSrc(1), invOut = gain(1);
     r.curve = FX.curveOf(x => Math.min(1, Math.abs(x)), 1025); lp.type = 'lowpass'; lp.Q.value = 0.5;
     inp.connect(pre); pre.connect(r); r.connect(lp); lp.connect(env); env.connect(inv); inv.connect(invOut); one.connect(invOut);
-    const an = ctx.createAnalyser(); an.fftSize = 32; env.connect(an); const sink = gain(0); an.connect(sink); sink.connect(ctx.destination);
+    const an = ctx.createAnalyser(); an.fftSize = 32; env.connect(an);
     const buf = new Float32Array(32); m.read = () => { an.getFloatTimeDomainData(buf); return buf[31]; };
     m.p('gain', { label: 'Gain', min: 0.5, max: 12, curve: 'exp', def: 0.35, fmt: v => v.toFixed(1) + '×', apply: v => smooth(pre.gain, v) });
     m.p('speed', { label: 'Speed', min: 2, max: 40, curve: 'exp', def: 0.45, fmt: v => Math.round(v) + 'Hz', apply: v => smooth(lp.frequency, v) });
@@ -2984,6 +2993,8 @@ const UI = (() => {
   function showDepth(e, p) { readout.style.display = 'block'; readout.textContent = `${p.mod.name} ${p.label}: modulation depth ${p.modDepth >= 0 ? '+' : ''}${Math.round(p.modDepth * 100)}%`; readout.style.left = (e.clientX + 14) + 'px'; readout.style.top = (e.clientY - 26) + 'px'; }
   // the coloured band around a modulated knob: how far the cable can push it, and where it is right now
   const ringed = new Set();
+  // set an attribute only when it changes: unchanged SVG needs no repaint
+  const setA = (el, k, v) => { const c = el.__a || (el.__a = {}); v = String(v); if (c[k] !== v) { c[k] = v; el.setAttribute(k, v); } };
   function drawModRings() {
     const seen = new Set();
     for (const L of [0, 1]) {
@@ -2994,12 +3005,12 @@ const UI = (() => {
         seen.add(el); ringed.add(el);
         const mr = el.querySelector('.mr'), md = el.querySelector('.md');
         const a0 = -135 + p.n * 270, a1 = -135 + Math.max(0, Math.min(1, p.n + p.modDepth)) * 270;
-        mr.setAttribute('d', Math.abs(a1 - a0) > 0.5 ? arc(Math.min(a0, a1), Math.max(a0, a1), 47) : ''); mr.setAttribute('stroke', c.color);
-        const an = (-135 + p.nm * 270) * Math.PI / 180; md.setAttribute('cx', (50 + 44 * Math.sin(an)).toFixed(1)); md.setAttribute('cy', (50 - 44 * Math.cos(an)).toFixed(1)); md.setAttribute('fill', c.color);
-        el.classList.add('modded');
+        setA(mr, 'd', Math.abs(a1 - a0) > 0.5 ? arc(Math.min(a0, a1), Math.max(a0, a1), 47) : ''); setA(mr, 'stroke', c.color);
+        const an = (-135 + p.nm * 270) * Math.PI / 180; setA(md, 'cx', (50 + 44 * Math.sin(an)).toFixed(1)); setA(md, 'cy', (50 - 44 * Math.cos(an)).toFixed(1)); setA(md, 'fill', c.color);
+        if (!el.classList.contains('modded')) el.classList.add('modded');
       }
     }
-    for (const el of ringed) if (!seen.has(el)) { el.querySelector('.mr').setAttribute('d', ''); el.querySelector('.md').setAttribute('cy', -99); el.classList.remove('modded'); ringed.delete(el); }
+    for (const el of ringed) if (!seen.has(el)) { setA(el.querySelector('.mr'), 'd', ''); setA(el.querySelector('.md'), 'cy', -99); el.classList.remove('modded'); ringed.delete(el); }
   }
   // short message at the bottom of the rack
   const toast = h('div', 'toast'); document.body.append(toast); let toastT = 0;
@@ -3260,7 +3271,7 @@ const UI = (() => {
     const mg = el.querySelector('.mixgrid');
     if (mg) { mg.style.display = 'grid'; mg.style.gridTemplateColumns = 'repeat(8,1fr)'; mg.style.justifyItems = 'center'; }
     lanes[E.L].append(el);
-    U.modEls[id] = el;
+    U.modEls[id] = el; U.watchModule(el);
     buildingId = null;
     if (isNew) setTimeout(() => el.classList.remove('mod-new'), 2200);
     return el;
@@ -3286,7 +3297,7 @@ const UI = (() => {
   U.removeModule = function (id, force) {
     if ((FIXED.has(id) && !force) || !E.mods[id]) return false;
     E.remove(id);
-    U.modEls[id]?.remove(); delete U.modEls[id];
+    if (U.modEls[id]) { U.unwatchModule(U.modEls[id]); U.modEls[id].remove(); } delete U.modEls[id];
     for (const k of Object.keys(U.jacks)) if (k.startsWith(id + '.')) { delete U.jacks[k]; delete U.jpos[k]; }
     for (const k of Object.keys(U.knobs)) if (k.startsWith(id + '.')) delete U.knobs[k];
     U.animated = U.animated.filter(f => f._mod !== id || f._layer !== E.L);
@@ -3345,9 +3356,11 @@ const UI = (() => {
   }
   function drawCable(g, a, b, born, ai) {
     const d = cablePath(a, b, born);
-    const ps = g.querySelectorAll('path'); ps.forEach(p => p.setAttribute('d', d));
-    const cs = g.querySelectorAll('circle'); cs[0].setAttribute('cx', a.x); cs[0].setAttribute('cy', a.y); cs[1].setAttribute('cx', b.x); cs[1].setAttribute('cy', b.y);
-    g.classList.toggle('ai', !!ai);
+    if (g.__d !== d) { // only touch the SVG when the cable actually moved
+      g.__d = d; const ps = g.__ps || (g.__ps = g.querySelectorAll('path')); ps.forEach(p => p.setAttribute('d', d));
+      const cs = g.__cs || (g.__cs = g.querySelectorAll('circle')); cs[0].setAttribute('cx', a.x); cs[0].setAttribute('cy', a.y); cs[1].setAttribute('cx', b.x); cs[1].setAttribute('cy', b.y);
+    }
+    if (g.__ai !== !!ai) { g.__ai = !!ai; g.classList.toggle('ai', !!ai); }
   }
   const tempEls = [null, null, null];
   function drawAllCables() {
@@ -3528,11 +3541,20 @@ const UI = (() => {
   U.setTwoHands = on => { U.twoHands = !!on; if (!on) U.handOff(1); U.syncFollow?.(); };
 
   // ---------- frame loop ----------
-  function frame() {
+  // Displays (scopes, meters, step lights) are only drawn for modules that are on screen, at about 30 frames a
+  // second while the audio runs and about 8 when it is off. Cables and knobs still follow every frame.
+  const onScreen = new Set();
+  const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => { const k = e.target.dataset.layer + ':' + e.target.dataset.mod; if (e.isIntersecting) onScreen.add(k); else onScreen.delete(k); }), { rootMargin: '120px' }) : null;
+  U.watchModule = el => { if (io) io.observe(el); else onScreen.add(el.dataset.layer + ':' + el.dataset.mod); };
+  U.unwatchModule = el => { if (io) io.unobserve(el); onScreen.delete(el.dataset.layer + ':' + el.dataset.mod); };
+  let fn = 0, lastT = 0;
+  function frame(t) {
+    requestAnimationFrame(frame);
     E.flushUI();
     drawAllCables(); drawModRings();
-    for (const f of U.animated) if (vis(f._layer)) f();
-    requestAnimationFrame(frame);
+    const every = E.ctx.state === 'running' ? 30 : 120; // ms between display redraws
+    if (t - lastT < every) return; lastT = t; fn++;
+    for (const f of U.animated) if (vis(f._layer) && onScreen.has(f._layer + ':' + f._mod)) { try { f(); } catch (e) { console.error(e); } }
   }
 
   // cable visibility
@@ -7238,7 +7260,8 @@ const Layers = (() => {
   function paint() {
     $$('.ltab').forEach(b => { const on = +b.dataset.l === E.V; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
     const n = E.layers[1].order.length;
-    $('#lnote').textContent = !n ? 'Layer B is empty: open it to duplicate Layer A' : UI.split ? 'Split view: Layer A | Layer B' : `Showing ${E.layerName(E.V)}`;
+    const zz = [0, 1].filter(L => E.hasLayer(L) && !E.layers[L].awake).map(L => E.layerName(L));
+    $('#lnote').textContent = (!n ? 'Layer B is empty: open it to duplicate Layer A' : UI.split ? 'Split view: Layer A | Layer B' : `Showing ${E.layerName(E.V)}`) + (zz.length ? ` · ${zz.join(', ')} asleep while faded out (saves CPU; it wakes when faded in)` : '');
     $('#splitab').setAttribute('aria-pressed', UI.split);
     $('.ltab[data-l="1"]').classList.toggle('empty', !n);
   }
@@ -7266,7 +7289,7 @@ const Layers = (() => {
     ma.style.width = Math.round(a * 100) + '%'; mb.style.width = Math.round(b * 100) + '%';
     if (!dragging) xf.value = Math.round(xpos() * 1000);
   }, 120);
-  E.on('view', paint);
+  E.on('view', paint); E.on('layersleep', paint); E.on('layercopy', paint);
   paint();
   return { snapshot, load, clear, duplicate, crossfade, xpos, show, paint };
 })();

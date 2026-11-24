@@ -55,6 +55,8 @@ const UI = (() => {
   function showDepth(e, p) { readout.style.display = 'block'; readout.textContent = `${p.mod.name} ${p.label}: modulation depth ${p.modDepth >= 0 ? '+' : ''}${Math.round(p.modDepth * 100)}%`; readout.style.left = (e.clientX + 14) + 'px'; readout.style.top = (e.clientY - 26) + 'px'; }
   // the coloured band around a modulated knob: how far the cable can push it, and where it is right now
   const ringed = new Set();
+  // set an attribute only when it changes: unchanged SVG needs no repaint
+  const setA = (el, k, v) => { const c = el.__a || (el.__a = {}); v = String(v); if (c[k] !== v) { c[k] = v; el.setAttribute(k, v); } };
   function drawModRings() {
     const seen = new Set();
     for (const L of [0, 1]) {
@@ -65,12 +67,12 @@ const UI = (() => {
         seen.add(el); ringed.add(el);
         const mr = el.querySelector('.mr'), md = el.querySelector('.md');
         const a0 = -135 + p.n * 270, a1 = -135 + Math.max(0, Math.min(1, p.n + p.modDepth)) * 270;
-        mr.setAttribute('d', Math.abs(a1 - a0) > 0.5 ? arc(Math.min(a0, a1), Math.max(a0, a1), 47) : ''); mr.setAttribute('stroke', c.color);
-        const an = (-135 + p.nm * 270) * Math.PI / 180; md.setAttribute('cx', (50 + 44 * Math.sin(an)).toFixed(1)); md.setAttribute('cy', (50 - 44 * Math.cos(an)).toFixed(1)); md.setAttribute('fill', c.color);
-        el.classList.add('modded');
+        setA(mr, 'd', Math.abs(a1 - a0) > 0.5 ? arc(Math.min(a0, a1), Math.max(a0, a1), 47) : ''); setA(mr, 'stroke', c.color);
+        const an = (-135 + p.nm * 270) * Math.PI / 180; setA(md, 'cx', (50 + 44 * Math.sin(an)).toFixed(1)); setA(md, 'cy', (50 - 44 * Math.cos(an)).toFixed(1)); setA(md, 'fill', c.color);
+        if (!el.classList.contains('modded')) el.classList.add('modded');
       }
     }
-    for (const el of ringed) if (!seen.has(el)) { el.querySelector('.mr').setAttribute('d', ''); el.querySelector('.md').setAttribute('cy', -99); el.classList.remove('modded'); ringed.delete(el); }
+    for (const el of ringed) if (!seen.has(el)) { setA(el.querySelector('.mr'), 'd', ''); setA(el.querySelector('.md'), 'cy', -99); el.classList.remove('modded'); ringed.delete(el); }
   }
   // short message at the bottom of the rack
   const toast = h('div', 'toast'); document.body.append(toast); let toastT = 0;
@@ -331,7 +333,7 @@ const UI = (() => {
     const mg = el.querySelector('.mixgrid');
     if (mg) { mg.style.display = 'grid'; mg.style.gridTemplateColumns = 'repeat(8,1fr)'; mg.style.justifyItems = 'center'; }
     lanes[E.L].append(el);
-    U.modEls[id] = el;
+    U.modEls[id] = el; U.watchModule(el);
     buildingId = null;
     if (isNew) setTimeout(() => el.classList.remove('mod-new'), 2200);
     return el;
@@ -357,7 +359,7 @@ const UI = (() => {
   U.removeModule = function (id, force) {
     if ((FIXED.has(id) && !force) || !E.mods[id]) return false;
     E.remove(id);
-    U.modEls[id]?.remove(); delete U.modEls[id];
+    if (U.modEls[id]) { U.unwatchModule(U.modEls[id]); U.modEls[id].remove(); } delete U.modEls[id];
     for (const k of Object.keys(U.jacks)) if (k.startsWith(id + '.')) { delete U.jacks[k]; delete U.jpos[k]; }
     for (const k of Object.keys(U.knobs)) if (k.startsWith(id + '.')) delete U.knobs[k];
     U.animated = U.animated.filter(f => f._mod !== id || f._layer !== E.L);
@@ -416,9 +418,11 @@ const UI = (() => {
   }
   function drawCable(g, a, b, born, ai) {
     const d = cablePath(a, b, born);
-    const ps = g.querySelectorAll('path'); ps.forEach(p => p.setAttribute('d', d));
-    const cs = g.querySelectorAll('circle'); cs[0].setAttribute('cx', a.x); cs[0].setAttribute('cy', a.y); cs[1].setAttribute('cx', b.x); cs[1].setAttribute('cy', b.y);
-    g.classList.toggle('ai', !!ai);
+    if (g.__d !== d) { // only touch the SVG when the cable actually moved
+      g.__d = d; const ps = g.__ps || (g.__ps = g.querySelectorAll('path')); ps.forEach(p => p.setAttribute('d', d));
+      const cs = g.__cs || (g.__cs = g.querySelectorAll('circle')); cs[0].setAttribute('cx', a.x); cs[0].setAttribute('cy', a.y); cs[1].setAttribute('cx', b.x); cs[1].setAttribute('cy', b.y);
+    }
+    if (g.__ai !== !!ai) { g.__ai = !!ai; g.classList.toggle('ai', !!ai); }
   }
   const tempEls = [null, null, null];
   function drawAllCables() {
@@ -599,11 +603,20 @@ const UI = (() => {
   U.setTwoHands = on => { U.twoHands = !!on; if (!on) U.handOff(1); U.syncFollow?.(); };
 
   // ---------- frame loop ----------
-  function frame() {
+  // Displays (scopes, meters, step lights) are only drawn for modules that are on screen, at about 30 frames a
+  // second while the audio runs and about 8 when it is off. Cables and knobs still follow every frame.
+  const onScreen = new Set();
+  const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => { const k = e.target.dataset.layer + ':' + e.target.dataset.mod; if (e.isIntersecting) onScreen.add(k); else onScreen.delete(k); }), { rootMargin: '120px' }) : null;
+  U.watchModule = el => { if (io) io.observe(el); else onScreen.add(el.dataset.layer + ':' + el.dataset.mod); };
+  U.unwatchModule = el => { if (io) io.unobserve(el); onScreen.delete(el.dataset.layer + ':' + el.dataset.mod); };
+  let fn = 0, lastT = 0;
+  function frame(t) {
+    requestAnimationFrame(frame);
     E.flushUI();
     drawAllCables(); drawModRings();
-    for (const f of U.animated) if (vis(f._layer)) f();
-    requestAnimationFrame(frame);
+    const every = E.ctx.state === 'running' ? 30 : 120; // ms between display redraws
+    if (t - lastT < every) return; lastT = t; fn++;
+    for (const f of U.animated) if (vis(f._layer) && onScreen.has(f._layer + ':' + f._mod)) { try { f(); } catch (e) { console.error(e); } }
   }
 
   // cable visibility

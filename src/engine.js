@@ -13,8 +13,16 @@ const Engine = (() => {
   // screen, which is also the one the hands work on. E.within(L, fn) runs fn with layer L in context.
   E.out = ctx.createGain(); E.out.connect(ctx.destination);
   E.outAn = ctx.createAnalyser(); E.outAn.fftSize = 2048; E.outAn.smoothingTimeConstant = 0.6; E.out.connect(E.outAn);
-  const mkLayer = i => { const bus = ctx.createGain(); bus.gain.value = i ? 0 : 1; bus.connect(E.out); return { i, name: 'AB'[i], mods: {}, order: [], cables: [], harmony: [], bus, level: i ? 0 : 1 }; };
+  // Each layer has a master bus and a silent sink. Every analyser (meters, displays, CV readers) also feeds its
+  // layer's sink, so a layer's whole audio graph hangs off its bus. A layer that has been faded all the way out
+  // goes to sleep: its bus is unplugged from the output and the browser stops computing any of its audio.
+  const mkLayer = i => { const bus = ctx.createGain(), sink = ctx.createGain(); bus.gain.value = i ? 0 : 1; sink.gain.value = 0; sink.connect(bus); if (!i) bus.connect(E.out);
+    return { i, name: 'AB'[i], mods: {}, order: [], cables: [], harmony: [], bus, sink, level: i ? 0 : 1, awake: !i, sleepT: 0 }; };
   E.layers = [mkLayer(0), mkLayer(1)]; E.L = 0; E.V = 0;
+  { const ca = ctx.createAnalyser.bind(ctx); ctx.createAnalyser = (...a) => { const n = ca(...a); if (E._collect) n.connect(E.layers[E.L].sink); return n; }; } // only analysers inside modules (never one on the master)
+  E.wakeLayer = L => { const Ly = E.layers[L]; clearTimeout(Ly.sleepT); if (!Ly.awake) { Ly.bus.connect(E.out); Ly.awake = true; E.fire('layersleep', { L, asleep: false }); } };
+  const sleepLater = (L, ms) => { const Ly = E.layers[L]; clearTimeout(Ly.sleepT);
+    Ly.sleepT = setTimeout(() => { if (Ly.level < 1e-4 && Ly.awake) { Ly.bus.disconnect(); Ly.awake = false; E.fire('layersleep', { L, asleep: true }); } }, ms); };
   ['mods', 'order', 'cables', 'harmony'].forEach(k => Object.defineProperty(E, k, { get: () => E.layers[E.L][k], set: v => { E.layers[E.L][k] = v; } }));
   E.within = (L, fn) => { const o = E.L; E.L = L; try { return fn(); } finally { E.L = o; } };
   E.hasLayer = L => E.layers[L].order.length > 0;
@@ -23,8 +31,10 @@ const Engine = (() => {
   E.fadeLayer = (L, to, sec = 0.05, at) => {
     const g = E.layers[L].bus.gain, now = ctx.currentTime, t = Math.max(now, at ?? now);
     if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(t); else { g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); }
+    if (to > 1e-4) E.wakeLayer(L);
     g.linearRampToValueAtTime(to, t + Math.max(0.01, sec));
     E.layers[L].level = to;
+    if (to <= 1e-4) sleepLater(L, (t - now + Math.max(0.01, sec)) * 1000 + 1500);
     E.fire('layerfade', { L, to, sec, at: t });
   };
   // Record every source node a module starts while it is being built, so the module can be removed cleanly later
@@ -143,13 +153,12 @@ const Engine = (() => {
   // ---------- Knob modulation ----------
   // Any continuous knob can take a cable on its own (Massive-style): the cable lands on input "@key", whose gain is
   // the modulation depth. The signal is read ~40 times a second and added on top of where the knob sits.
-  const modSink = ctx.createGain(); modSink.gain.value = 0; modSink.connect(ctx.destination);
   E.modIn = (id, key) => {
     const m = E.mods[id], p = m?.params[key]; if (!p || !p.canMod) return null;
     const name = '@' + key;
     if (!m.ins[name]) {
       const g = ctx.createGain(), an = ctx.createAnalyser(); g.gain.value = p.modDepth; an.fftSize = 32;
-      g.connect(an); an.connect(modSink);
+      g.connect(an); an.connect(E.layers[E.L].sink); // reaches the speakers through its layer's sink
       m.ins[name] = { kind: 'sig', jt: 'cv', node: g, an, buf: new Float32Array(32), key, knob: true, desc: `modulates ${p.label}` };
     }
     return m.ins[name];

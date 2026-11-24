@@ -232,7 +232,7 @@ const LFO = (() => {
     const inp = gain(1), pre = gain(2), r = ctx.createWaveShaper(), lp = ctx.createBiquadFilter(), env = gain(1), inv = gain(-1), one = constSrc(1), invOut = gain(1);
     r.curve = FX.curveOf(x => Math.min(1, Math.abs(x)), 1025); lp.type = 'lowpass'; lp.Q.value = 0.5;
     inp.connect(pre); pre.connect(r); r.connect(lp); lp.connect(env); env.connect(inv); inv.connect(invOut); one.connect(invOut);
-    const an = ctx.createAnalyser(); an.fftSize = 32; env.connect(an); const sink = gain(0); an.connect(sink); sink.connect(ctx.destination);
+    const an = ctx.createAnalyser(); an.fftSize = 32; env.connect(an);
     const buf = new Float32Array(32); m.read = () => { an.getFloatTimeDomainData(buf); return buf[31]; };
     m.p('gain', { label: 'Gain', min: 0.5, max: 12, curve: 'exp', def: 0.35, fmt: v => v.toFixed(1) + '×', apply: v => smooth(pre.gain, v) });
     m.p('speed', { label: 'Speed', min: 2, max: 40, curve: 'exp', def: 0.45, fmt: v => Math.round(v) + 'Hz', apply: v => smooth(lp.frequency, v) });

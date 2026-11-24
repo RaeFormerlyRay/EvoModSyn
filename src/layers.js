@@ -67,7 +67,8 @@ const Layers = (() => {
   function paint() {
     $$('.ltab').forEach(b => { const on = +b.dataset.l === E.V; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
     const n = E.layers[1].order.length;
-    $('#lnote').textContent = !n ? 'Layer B is empty: open it to duplicate Layer A' : UI.split ? 'Split view: Layer A | Layer B' : `Showing ${E.layerName(E.V)}`;
+    const zz = [0, 1].filter(L => E.hasLayer(L) && !E.layers[L].awake).map(L => E.layerName(L));
+    $('#lnote').textContent = (!n ? 'Layer B is empty: open it to duplicate Layer A' : UI.split ? 'Split view: Layer A | Layer B' : `Showing ${E.layerName(E.V)}`) + (zz.length ? ` · ${zz.join(', ')} asleep while faded out (saves CPU; it wakes when faded in)` : '');
     $('#splitab').setAttribute('aria-pressed', UI.split);
     $('.ltab[data-l="1"]').classList.toggle('empty', !n);
   }
@@ -95,7 +96,7 @@ const Layers = (() => {
     ma.style.width = Math.round(a * 100) + '%'; mb.style.width = Math.round(b * 100) + '%';
     if (!dragging) xf.value = Math.round(xpos() * 1000);
   }, 120);
-  E.on('view', paint);
+  E.on('view', paint); E.on('layersleep', paint); E.on('layercopy', paint);
   paint();
   return { snapshot, load, clear, duplicate, crossfade, xpos, show, paint };
 })();
