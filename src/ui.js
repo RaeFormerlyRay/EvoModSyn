@@ -29,8 +29,8 @@ const UI = (() => {
   function makeKnob(mod, key) {
     const p = mod.params[key];
     const el = h('div', 'knob' + (p.small ? ' sm' : ''));
-    el.innerHTML = `<div class="dial" tabindex="0" role="slider" aria-label="${mod.name} ${p.label}"><svg class="ring" viewBox="0 0 100 100"><path class="bg" d="${arc(-135, 135)}"/><path class="fg"/></svg><div class="ptr"></div></div><div class="lab">${p.label}</div><div class="val"></div>`;
-    el.style.setProperty('--kc', mod.stripe);
+    el.innerHTML = `<div class="dial" tabindex="0" role="slider" aria-label="${mod.name} ${p.label}"><svg class="ring" viewBox="0 0 100 100"><path class="bg" d="${arc(-135, 135)}"/><path class="fg"/><path class="mr"/><circle class="md" r="6" cx="50" cy="-99"/></svg><div class="ptr"></div></div><div class="lab">${p.label}</div><div class="val"></div>`;
+    el.style.setProperty('--kc', mod.stripe); el.dataset.mod = mod.id; el.dataset.key = key;
     const dial = $('.dial', el), ptr = $('.ptr', el), fg = $('.fg', el), val = $('.val', el);
     const draw = () => {
       const a = -135 + p.n * 270; ptr.style.transform = `rotate(${a}deg)`;
@@ -39,16 +39,42 @@ const UI = (() => {
     };
     p.listeners.push(draw); draw();
     let sy = 0, sn = 0, drag = false;
-    dial.addEventListener('pointerdown', e => { drag = true; sy = e.clientY; sn = p.n; dial.setPointerCapture(e.pointerId); showReadout(e, p); e.preventDefault(); });
-    dial.addEventListener('pointermove', e => { if (!drag) return; const k = e.shiftKey ? 0.15 : 1; p.setNorm(sn + (sy - e.clientY) / 170 * k * (p.steps ? Math.max(1, 8 / p.steps.length) : 1)); showReadout(e, p); });
-    const up = () => { drag = false; readout.style.display = 'none'; };
+    const linkOf = () => E.within(+el.closest('.mod').dataset.layer, () => E.findCable(mod.id, '@' + key));
+    let depthDrag = false, sd = 0;
+    dial.addEventListener('contextmenu', e => { const c = linkOf(); if (!c) return; e.preventDefault(); E.within(+el.closest('.mod').dataset.layer, () => E.disconnect(c)); });
+    dial.addEventListener('pointerdown', e => { if ((e.altKey || e.ctrlKey || e.metaKey) && linkOf()) { depthDrag = true; sy = e.clientY; sd = p.modDepth; dial.setPointerCapture(e.pointerId); e.preventDefault(); showDepth(e, p); return; } drag = true; sy = e.clientY; sn = p.n; dial.setPointerCapture(e.pointerId); showReadout(e, p); e.preventDefault(); });
+    dial.addEventListener('pointermove', e => { if (depthDrag) { E.within(+el.closest('.mod').dataset.layer, () => E.setModDepth(mod.id, key, sd + (sy - e.clientY) / 170)); showDepth(e, p); return; } if (!drag) return; const k = e.shiftKey ? 0.15 : 1; p.setNorm(sn + (sy - e.clientY) / 170 * k * (p.steps ? Math.max(1, 8 / p.steps.length) : 1)); showReadout(e, p); });
+    const up = () => { drag = false; depthDrag = false; readout.style.display = 'none'; };
     dial.addEventListener('pointerup', up); dial.addEventListener('pointercancel', up);
     dial.addEventListener('dblclick', () => p.setNorm(p.defN));
-    dial.addEventListener('wheel', e => { e.preventDefault(); const st = p.steps ? 1 / (p.steps.length - 1) : 0.02; p.setNorm(p.n + (e.deltaY < 0 ? st : -st)); }, { passive: false });
+    dial.addEventListener('wheel', e => { e.preventDefault(); if ((e.altKey || e.ctrlKey || e.metaKey) && linkOf()) { E.within(+el.closest('.mod').dataset.layer, () => E.setModDepth(mod.id, key, p.modDepth + (e.deltaY < 0 ? 0.03 : -0.03))); showDepth(e, p); return; } const st = p.steps ? 1 / (p.steps.length - 1) : 0.02; p.setNorm(p.n + (e.deltaY < 0 ? st : -st)); }, { passive: false });
     dial.addEventListener('keydown', e => { const st = p.steps ? 1 / (p.steps.length - 1) : 0.02; if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { p.setNorm(p.n + st); e.preventDefault(); } if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { p.setNorm(p.n - st); e.preventDefault(); } });
     U.knobs[mod.id + '.' + key] = el;
     return el;
   }
+  function showDepth(e, p) { readout.style.display = 'block'; readout.textContent = `${p.mod.name} ${p.label}: modulation depth ${p.modDepth >= 0 ? '+' : ''}${Math.round(p.modDepth * 100)}%`; readout.style.left = (e.clientX + 14) + 'px'; readout.style.top = (e.clientY - 26) + 'px'; }
+  // the coloured band around a modulated knob: how far the cable can push it, and where it is right now
+  const ringed = new Set();
+  function drawModRings() {
+    const seen = new Set();
+    for (const L of [0, 1]) {
+      if (!vis(L)) continue;
+      for (const c of E.layers[L].cables) {
+        if (c.to.port[0] !== '@') continue;
+        const key = c.to.port.slice(1), el = LU[L].knobs[c.to.mod + '.' + key], p = E.layers[L].mods[c.to.mod]?.params[key]; if (!el || !p) continue;
+        seen.add(el); ringed.add(el);
+        const mr = el.querySelector('.mr'), md = el.querySelector('.md');
+        const a0 = -135 + p.n * 270, a1 = -135 + Math.max(0, Math.min(1, p.n + p.modDepth)) * 270;
+        mr.setAttribute('d', Math.abs(a1 - a0) > 0.5 ? arc(Math.min(a0, a1), Math.max(a0, a1), 47) : ''); mr.setAttribute('stroke', c.color);
+        const an = (-135 + p.nm * 270) * Math.PI / 180; md.setAttribute('cx', (50 + 44 * Math.sin(an)).toFixed(1)); md.setAttribute('cy', (50 - 44 * Math.cos(an)).toFixed(1)); md.setAttribute('fill', c.color);
+        el.classList.add('modded');
+      }
+    }
+    for (const el of ringed) if (!seen.has(el)) { el.querySelector('.mr').setAttribute('d', ''); el.querySelector('.md').setAttribute('cy', -99); el.classList.remove('modded'); ringed.delete(el); }
+  }
+  // short message at the bottom of the rack
+  const toast = h('div', 'toast'); document.body.append(toast); let toastT = 0;
+  U.flashMsg = txt => { toast.textContent = txt; toast.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => toast.classList.remove('on'), 4200); };
   function showReadout(e, p) { readout.style.display = 'block'; readout.textContent = `${p.mod.name} ${p.label}: ${p.display()}`; readout.style.left = (e.clientX + 14) + 'px'; readout.style.top = (e.clientY - 26) + 'px'; }
 
   // ---------- jacks ----------
@@ -315,7 +341,7 @@ const UI = (() => {
     new ResizeObserver(() => U.layout()).observe(rack);
     window.addEventListener('resize', () => U.layout());
     U.layout();
-    E.on('change', ev => { if (!vis(E.L)) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
+    E.on('change', ev => { if (!vis(E.L)) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); if (ev.cable && ev.cable.to.port[0] === '@') U.layout(); U.status(); });
     requestAnimationFrame(frame);
   };
   // Add a new module of a registered type to the end of the rack; returns its id
@@ -360,11 +386,13 @@ const UI = (() => {
       if (!vis(L)) continue;
       const J = LU[L];
       for (const k in J.jacks) { const r = J.jacks[k].querySelector('.hole').getBoundingClientRect(); J.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
+      // knobs that take a modulation cable are cable ends too
+      for (const c of E.layers[L].cables) if (c.to.port[0] === '@') { const el = J.knobs[c.to.mod + '.' + c.to.port.slice(1)]; if (!el) continue; const r = el.querySelector('.dial').getBoundingClientRect(); J.jpos[`${c.to.mod}.in.${c.to.port}`] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
     }
     svg.setAttribute('width', rack.scrollWidth); svg.setAttribute('height', rack.scrollHeight);
     svg.style.width = rack.scrollWidth + 'px'; svg.style.height = rack.scrollHeight + 'px';
   };
-  U.jackXY = (mod, dir, port) => U.jpos[`${mod}.${dir}.${port}`];
+  U.jackXY = (mod, dir, port) => U.jpos[`${mod}.${dir}.${port}`] || (port && port[0] === '@' ? knobCenter(mod, port.slice(1)) : undefined);
   U.status = () => { const Ly = E.layers[E.V]; $('#cpu').textContent = `${E.layerName(E.V)} · ${Ly.order.length} modules · ${Ly.cables.length} cables`; };
 
   // ---------- cables ----------
@@ -378,7 +406,7 @@ const UI = (() => {
     const want = new Map();
     for (const L of [0, 1]) if (vis(L)) for (const c of E.layers[L].cables) want.set(c.id, c);
     for (const [id, g] of cabEls) if (!want.has(id)) { g.remove(); cabEls.delete(id); }
-    for (const c of want.values()) if (!cabEls.has(c.id)) cabEls.set(c.id, mkCableEl(c.color));
+    for (const c of want.values()) if (!cabEls.has(c.id)) { const g = mkCableEl(c.color); if (c.to.port[0] === '@') g.classList.add('modlink'); cabEls.set(c.id, g); }
   };
   function cablePath(a, b, born) {
     const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy);
@@ -436,8 +464,14 @@ const UI = (() => {
   }
   function endDrag(e) {
     window.removeEventListener('pointermove', onDrag);
-    const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('.jack');
+    const under = document.elementFromPoint(e.clientX, e.clientY), t = under?.closest('.jack'), kn = !t && under?.closest('.knob');
     hoverEl?.classList.remove('hover'); hoverEl = null;
+    // a cable dropped on a knob modulates that knob
+    if (kn && drag && drag.anchor.dir === 'out' && +kn.closest('.mod').dataset.layer === drag.L) {
+      const ok = E.within(drag.L, () => E.connect({ mod: drag.anchor.mod, port: drag.anchor.port }, { mod: kn.dataset.mod, port: '@' + kn.dataset.key }));
+      if (!ok) U.flashMsg?.('That knob cannot be modulated (stepped switches and the tempo cannot), or the jack is a clock/gate jack.');
+      else { const km = E.layers[drag.L].mods[kn.dataset.mod]; U.flashMsg?.(`Modulating ${km.name} ${km.params[kn.dataset.key].label}. Alt + drag the knob sets the depth, right-click removes the cable.`); }
+    }
     if (t && drag && t.dataset.dir !== drag.anchor.dir && +t.closest('.mod').dataset.layer === drag.L) {
       const A = drag.anchor, B = { mod: t.dataset.mod, port: t.dataset.port, dir: t.dataset.dir };
       const from = A.dir === 'out' ? A : B, to = A.dir === 'out' ? B : A;
@@ -513,7 +547,7 @@ const UI = (() => {
     H.aiPatch = async function (from, to, label) {
       const a = U.jackXY(from.mod, 'out', from.port), b = U.jackXY(to.mod, 'in', to.port);
       if (!a || !b || !E.canConnect(from, to)) return false;
-      const ja = U.jacks[`${from.mod}.out.${from.port}`], jb = U.jacks[`${to.mod}.in.${to.port}`];
+      const ja = U.jacks[`${from.mod}.out.${from.port}`], jb = U.jacks[`${to.mod}.in.${to.port}`] || (to.port[0] === '@' && U.knobs[to.mod + '.' + to.port.slice(1)]);
       const existing = E.findCable(to.mod, to.port);
       if (existing && existing.from.mod === from.mod && existing.from.port === from.port) return true;
       if (existing) await H.aiUnpatch(existing);
@@ -567,7 +601,7 @@ const UI = (() => {
   // ---------- frame loop ----------
   function frame() {
     E.flushUI();
-    drawAllCables();
+    drawAllCables(); drawModRings();
     for (const f of U.animated) if (vis(f._layer)) f();
     requestAnimationFrame(frame);
   }

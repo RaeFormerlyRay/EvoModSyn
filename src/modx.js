@@ -107,7 +107,7 @@ const ModX = (() => {
     m.p('rate', { label: 'Rate', min: 0.02, max: 20, curve: 'exp', def: 0.35, fmt: hz, apply: retune });
     m.p('sync', { label: 'Sync', steps: SW_SYNC, def: 0, apply: retune });
     m.p('spread', { label: 'Rate spr', def: 0.3, fmt: pct, apply: retune });
-    m.p('phase', { label: 'Phase spr', def: 1, fmt: pct, apply: rebuild });
+    m.p('phase', { label: 'Phase spr', def: 1, fmt: pct, nomod: true, apply: rebuild });
     m.p('shape', { label: 'Shape', steps: SW_SHAPES, def: 0, apply: rebuild });
     m.p('depth', { label: 'Depth', def: 0.6, fmt: pct, apply: depth });
     m.p('pol', { label: 'Polarity', steps: ['BI', 'UNI'], def: 0, apply: depth });

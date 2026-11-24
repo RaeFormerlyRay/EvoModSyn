@@ -90,3 +90,28 @@ The same meters watch for high-pitched, repeating sounds. A part that keeps most
 - **Reel** is a tape-replay keyboard voice in the spirit of the Mellotron and the new 20CC Spectron. It has six synthesized tapes (strings, cello, flute, choir, brass, organ) with wow, flutter, age (hiss and saturation), tone and a chord mode. Notes sustain until the tape runs out (Tape Len), and a retriggered key starts its tape again. Ambient designs often add it, and the AI can swap tapes, change the chord shape and add or remove wobble.
 - **LPG Duo** is two vactrol-style low-pass gates. A TRIG pings the filter and the VCA open together, and they close with a fast-then-slow vactrol tail, so sustained voices turn into plucks and bongos. Modes are LP, COMBO and VCA. The AI can put a sequenced voice through it (it prefers the tapes) and make the plucks shorter or longer.
 - **Undo AI move** puts back the knob turns and patches of the AI's last move, and the AI learns that you didn't like it.
+
+## Effects, LFOs and knob modulation (24 November 2026)
+
+**Effects** (`src/fx.js`, all built from Web Audio nodes, each with IN, OUT and a Mix knob):
+Halls (algorithmic reverb: plate, room, hall, cathedral, spring, bloom, reverse, gated, with octave-up shimmer),
+Echoes (tape, digital, ping-pong, multi-head and cloud delay with wow, ducking, freeze and runaway feedback),
+Ensemble (chorus, string ensemble, dimension, flanger, through-zero flanger, vibrato), Phase 12 (4–12 stage stereo phaser, LFO or envelope sweep),
+Heat (tube, tape, fuzz, wavefolder, sine and parabolic shapers, rectifier, bitcrusher and sample-rate reducer),
+Bode (Hilbert frequency shifter, ring mod and barber-pole spiral feedback), Sympathy (sympathetic strings that follow the song's chords),
+Vowel (A-E-I-O-U formant filter), Pump (glue compressor, 3-band OTT-style squash, tempo sidechain pump),
+Stutter (beat repeat, reverse, tape stop, backspin), Prism (two-voice pitch shifter with cascading feedback),
+Cassette (age, wow, flutter, warp, hiss, dropouts) and Horizon (a chaotic feedback delay network that self-oscillates).
+
+**Modulation** (`src/lfo.js`): Orbit (four morphing LFOs with 11 shapes, sync, cross-mod and fade-in), Performer (two lanes of 16 drawn curve
+steps with presets like WOB8, PUMP, TALK, DUB), Attractor (Lorenz, Rössler, Thomas and logistic chaos), Macros (four macro knobs and a build
+riser with a DROP trigger) and Follower (envelope follower and transient trigger).
+
+**Any knob can be modulated, Massive-style**: drag a cable from any CV output and drop it on a knob. A coloured ring shows the range and the
+live position. Alt + drag (or Alt + wheel) on the knob sets the depth, right-click removes the cable.
+
+The drum machine has an output per drum (BD … CY); patching one takes that drum out of the mix output.
+
+The AI inserts effects and patches LFOs and macros onto synth, filter and effect knobs on most designs, varies the modulation every
+12–30 seconds (dramatic in choruses and drops, subtle in verses), fires the macro riser in builds, rotates its instruments instead of
+defaulting to the bell, and keeps repeating high drums (cowbell first) low in the mix.

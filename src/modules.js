@@ -18,7 +18,7 @@ const Mods = (() => {
   // ======================= CLOCK =======================
   function Clock(id) {
     const m = new M(id, { name: 'Pulse', sub: 'master clock', width: 190, stripe: '#e9e6dc', family: 'clock' });
-    m.p('bpm', { label: 'Tempo', min: 60, max: 200, def: (126 - 60) / 140, apply: v => E.setBpm(v), fmt: v => v.toFixed(1) });
+    m.p('bpm', { label: 'Tempo', min: 60, max: 200, def: (126 - 60) / 140, nomod: true, apply: v => E.setBpm(v), fmt: v => v.toFixed(1) });
     m.p('swing', { label: 'Swing', min: 0, max: 0.6, def: 0, apply: v => { E.swing = v; }, fmt: pct });
     m.outEvent('CLK', '16th notes'); m.outEvent('BEAT', 'quarter notes'); m.outEvent('BAR', 'downbeats');
     m.emitTick = (t, step, dur) => {
@@ -266,7 +266,10 @@ const Mods = (() => {
     m.p('drive', { label: 'Drive', def: 0.1, fmt: pct, apply: v => { { const c = DSP.curveTanh(v * 0.6); if (sh._c !== c) { sh._c = c; sh.curve = c; } } pre.gain.value = 1 + v * 3; } });
     m.p('accent', { label: 'Accent', def: 0.6, fmt: pct });
     m.p('trigv', { label: 'Trig→', steps: INST, def: 0 });
-    m.p('level', { label: 'Level', def: 0.75, fmt: pct, apply: v => smooth(out.gain, v * 1.1) });
+    // individual outputs: patching one takes that drum out of the mix output, like the jacks on the real machines
+    const indiv = INST.map(() => gain(0.8));
+    m.p('level', { label: 'Level', def: 0.75, fmt: pct, apply: v => { smooth(out.gain, v * 1.1); indiv.forEach(g => smooth(g.gain, v * 1.1)); } });
+    const destOf = ins => { const i = INST.indexOf(ins); return E.cables.some(c => c.from.mod === m.id && c.from.port === ins) ? indiv[i] : bus; };
     // 8 pattern banks (A–H) with queued switching at the bar line and a song chain, like the step sequencers
     m.pats = Array.from({ length: 8 }, () => INST.map(() => Array(16).fill(0))); m.cur = 0; m.next = null; m.view = null;
     Object.defineProperty(m, 'pat', { get() { return this.pats[this.view ?? this.cur]; }, set(v) { this.pats[this.view ?? this.cur] = v; } });
@@ -294,7 +297,9 @@ const Mods = (() => {
       INST.forEach((ins, i) => { const v = this.pat[i][p]; if (v && !this.mute[i]) this.hit(ins, t, v === 2 ? 1 : 0.7); });
     }, 'clock in');
     m.inEvent('TRIG', function (e) { this.hit(this.params.trigv.choice, e.time, e.vel ?? 0.8); }, 'trigger one voice');
-    m.outAudio('OUT', out, 'drum mix');
+    m.outAudio('OUT', out, 'drum mix (minus any drum patched on its own)');
+    const NAMES = { BD: 'bass drum', SD: 'snare', CP: 'clap', CH: 'closed hat', OH: 'open hat', LT: 'low tom', HT: 'high tom', RS: 'rimshot', CB: 'cowbell', CY: 'cymbal' };
+    INST.forEach((ins, i) => m.outAudio(ins, indiv[i], NAMES[ins] + ' only'));
     let openHat = null;
     const env = (g, t, peak, dec, att = 0.001) => { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + att); g.gain.exponentialRampToValueAtTime(0.0001, t + att + dec); };
     const osc = (type, f, t, stop) => { const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); o.start(t); o.stop(stop); return o; };
@@ -304,13 +309,13 @@ const Mods = (() => {
       const a = vel >= 1 ? 1 + this.v('accent') * 0.8 : 1;
       const lv = this.lvl[INST.indexOf(ins)] * vel * a;
       const is8 = kit === '808', dirt = kit === 'DIRT', lofi = kit === 'LOFI';
-      const g = gain(0); g.connect(bus);
+      const dest = destOf(ins), g = gain(0); g.connect(dest);
       if (ins === 'BD') {
         const dec = (is8 ? 0.55 : dirt ? 0.35 : 0.32) * dk, o = osc(dirt ? 'square' : 'sine', (is8 ? 110 : 160) * tu, t, t + dec + 0.1);
         o.frequency.exponentialRampToValueAtTime((is8 ? 46 : 52) * tu, t + (is8 ? 0.09 : 0.05));
         if (dirt) { const lp = filt('lowpass', 900, 3); o.connect(lp); lp.connect(g); } else o.connect(g);
         env(g, t, lv * (dirt ? 0.7 : 1.15), dec);
-        if (!is8) { const n = noise(t, t + 0.02), hp = filt('highpass', 2500), cg = gain(0); n.connect(hp); hp.connect(cg); cg.connect(bus); env(cg, t, lv * 0.35, 0.012); }
+        if (!is8) { const n = noise(t, t + 0.02), hp = filt('highpass', 2500), cg = gain(0); n.connect(hp); hp.connect(cg); cg.connect(dest); env(cg, t, lv * 0.35, 0.012); }
       } else if (ins === 'SD') {
         const dec = (is8 ? 0.16 : 0.2) * dk;
         [is8 ? 238 : 185, is8 ? 476 : 330].forEach((f, k) => { const o = osc('triangle', f * tu, t, t + dec + 0.05); const og = gain(0); o.connect(og); og.connect(g); env(og, t, lv * (k ? 0.25 : 0.5), dec * 0.6); });

@@ -56,14 +56,18 @@ const Engine = (() => {
       Object.assign(this, { mod, key, label: o.label || key.toUpperCase(), min: o.min ?? 0, max: o.max ?? 1, curve: o.curve || 'lin',
         steps: o.steps || null, unit: o.unit || '', fmt: o.fmt || null, apply: o.apply || null, color: o.color || null, small: !!o.small });
       this.n = 0; this.listeners = [];
+      // modulation (a cable dropped on the knob): an offset in knob units added on top of where the knob sits
+      this.mod = 0; this.modDepth = 0.3; this.canMod = o.mod ?? (!o.nomod && !this.steps);
       let n = DSP.clamp(o.def != null ? o.def : 0.5);
       if (this.steps) n = Math.round(n * (this.steps.length - 1)) / Math.max(1, this.steps.length - 1);
       this.n = this.defN = n;
     }
+    get nm() { return this.mod ? DSP.clamp(this.n + this.mod) : this.n; } // where the knob is, with modulation
     get value() {
-      if (this.steps) return Math.round(this.n * (this.steps.length - 1));
-      if (this.curve === 'exp') return this.min * Math.pow(this.max / this.min, this.n);
-      return this.min + (this.max - this.min) * this.n;
+      const n = this.nm;
+      if (this.steps) return Math.round(n * (this.steps.length - 1));
+      if (this.curve === 'exp') return this.min * Math.pow(this.max / this.min, n);
+      return this.min + (this.max - this.min) * n;
     }
     get choice() { return this.steps ? this.steps[this.value] : null; }
     normOf(choice) {
@@ -136,10 +140,41 @@ const Engine = (() => {
   // ---------- Cables ----------
   const COLORS = ['#e8453c', '#f2b632', '#3e8ef0', '#45c46a', '#ef7d2e', '#a46ff0', '#e9e6dc', '#ff5fa2', '#2fd0c0'];
   let colorIx = 0;
+  // ---------- Knob modulation ----------
+  // Any continuous knob can take a cable on its own (Massive-style): the cable lands on input "@key", whose gain is
+  // the modulation depth. The signal is read ~40 times a second and added on top of where the knob sits.
+  const modSink = ctx.createGain(); modSink.gain.value = 0; modSink.connect(ctx.destination);
+  E.modIn = (id, key) => {
+    const m = E.mods[id], p = m?.params[key]; if (!p || !p.canMod) return null;
+    const name = '@' + key;
+    if (!m.ins[name]) {
+      const g = ctx.createGain(), an = ctx.createAnalyser(); g.gain.value = p.modDepth; an.fftSize = 32;
+      g.connect(an); an.connect(modSink);
+      m.ins[name] = { kind: 'sig', jt: 'cv', node: g, an, buf: new Float32Array(32), key, knob: true, desc: `modulates ${p.label}` };
+    }
+    return m.ins[name];
+  };
+  E.setModDepth = (id, key, d) => {
+    const m = E.mods[id], p = m?.params[key]; if (!p) return;
+    p.modDepth = DSP.clamp(d, -1, 1); const i = m.ins['@' + key]; if (i) i.node.gain.setTargetAtTime(p.modDepth, ctx.currentTime, 0.03);
+    E.fire('moddepth', { id, key, d: p.modDepth });
+  };
+  E.isModPort = port => port && port[0] === '@';
+  function modPass() {
+    for (const Ly of E.layers) for (const c of Ly.cables) {
+      if (c.to.port[0] !== '@') continue;
+      const m = Ly.mods[c.to.mod], i = m?.ins[c.to.port]; if (!i) continue;
+      i.an.getFloatTimeDomainData(i.buf);
+      let v = i.buf[31]; if (!(v === v)) v = 0; v = Math.max(-1.5, Math.min(1.5, v));
+      const p = m.params[i.key]; p.mod = v;
+      if (Math.abs(v - (p._am ?? 0)) > 0.0015 && p.apply) { p._am = v; E.within(Ly.i, () => { try { p.apply(p.value, p); } catch (e) { /* ignore */ } }); }
+    }
+  }
   E.findCable = (toMod, toPort) => E.cables.find(c => c.to.mod === toMod && c.to.port === toPort);
   E.canConnect = (from, to) => {
-    const o = E.mods[from.mod]?.outs[from.port], i = E.mods[to.mod]?.ins[to.port];
+    const o = E.mods[from.mod]?.outs[from.port], i = E.mods[to.mod]?.ins[to.port] || (E.isModPort(to.port) && E.modIn(to.mod, to.port.slice(1)));
     if (!o || !i) return false;
+    if (i.knob && from.mod === to.mod) return false;
     return (o.kind === 'ev') === (i.kind === 'ev');
   };
   E.connect = (from, to, opt = {}) => {
@@ -156,6 +191,7 @@ const Engine = (() => {
     const o = E.mods[c.from.mod].outs[c.from.port], i = E.mods[c.to.mod].ins[c.to.port];
     if (o.kind === 'ev') o.targets = o.targets.filter(t => t !== i);
     else { try { o.node.disconnect(i.node); } catch (e) { /* already gone */ } }
+    if (i.knob) { const p = E.mods[c.to.mod].params[i.key]; p.mod = 0; p._am = 0; try { p.apply?.(p.value, p); } catch (e) { /* ignore */ } p.listeners.forEach(f => f(p)); }
     E.cables = E.cables.filter(x => x !== c);
     E.fire('change', { type: 'disconnect', cable: c, ai: opt.ai });
   };
@@ -195,7 +231,7 @@ const Engine = (() => {
     }
   }
   // setInterval keeps running when the tab is hidden (throttled), rAF does not
-  setInterval(pass, 25);
+  setInterval(() => { pass(); modPass(); }, 25);
   E.start = () => { if (E.running) return; E.running = true; E.step = 0; E.layers.forEach(Ly => { Ly.harmony = []; }); E.nextTime = ctx.currentTime + 0.06; E.fire('transport', true); };
   E.stop = () => { if (!E.running) return; E.running = false; E.fire('transport', false); };
   E.setBpm = (b) => { E.bpm = DSP.clamp(b, 40, 220); E.fire('bpm', E.bpm); };

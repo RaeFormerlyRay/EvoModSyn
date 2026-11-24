@@ -165,9 +165,23 @@ const Mix = (() => {
     acts.push(K(c.mix, c.key, clamp(c.level.n * Math.pow(10, -5 / 40), 0.05, 1), `${c.name} down 5 dB: a high, repeating sound grates when it is left on`));
     return acts;
   }
+  // high drums that repeat (cowbell, cymbal, rimshot, hats) sit low; the cowbell lowest of all
+  const HI_CAP = { CB: 0.32, CY: 0.45, RS: 0.55, CH: 0.6, OH: 0.6, HT: 0.75 };
+  function tameHighDrums(d, quiet) {
+    if (!d?.lvl || !d.pats) return [];
+    const pat = d.pats[d.cur] || [], fixed = [];
+    for (const [ins, cap] of Object.entries(HI_CAP)) {
+      const i = d.INST.indexOf(ins); if (i < 0) continue;
+      const hits = (pat[i] || []).filter(Boolean).length, c = hits >= 6 ? cap * 0.8 : hits >= 3 ? cap : Math.min(1, cap + 0.2);
+      if (hits && d.lvl[i] > c + 0.01) { d.lvl[i] = c; fixed.push(ins); }
+    }
+    if (fixed.length && !quiet) AI.log('mix', `high drums kept low so they do not grate: ${fixed.join(' ')}`);
+    return fixed;
+  }
   // static check at design time: resonance screams and parts pitched too high
   function ungrate(why = 'nothing high-pitched should be left grating') {
     const acts = [];
+    if (E.mods.drums) tameHighDrums(E.mods.drums);
     for (const id of E.order) {
       const m = E.mods[id]; if (!m || !E.cables.some(c => c.from.mod === id)) continue;
       if (m.kind === 'Analog' && m.params.res.n > 0.85 && m.params.cutoff.n > 0.7) acts.push(K(id, 'res', 0.5, 'a resonant peak this high screams'));
@@ -187,17 +201,18 @@ const Mix = (() => {
       M.last[L] = meas;
       for (const c of meas.chs) {
         const key = `${L}.${c.mix}.${c.ch}`;
-        const shrill = c.active && c.role !== 'drums' && c.hiShare > 0.38 && c.db > meas.ref - 15;
+        const shrill = c.active && c.role !== 'drums' && c.hiShare > 0.32 && c.db > meas.ref - 16;
         M.shrill[key] = shrill ? (M.shrill[key] || 0) + 3 : 0;
-        if (M.shrill[key] >= 12) { // a high, repeating sound left on for 12 seconds: fix it now
+        if (M.shrill[key] >= 9) { // a high, repeating sound left on for 9 seconds: fix it now
           M.shrill[key] = 0;
           const acts = E.within(L, () => shrillFix(c));
           AI.log('mix', `${esc(c.name)} has been high-pitched and repeating for a while (${Math.round(c.hiShare * 100)}% of it above 3 kHz): fixing it before it grates`);
           if (L === AI.viewTarget() && AI.busy) AI.runAll(acts, 1); else E.within(L, () => applyNow(acts));
         }
-        if (c.role === 'drums' && c.active && c.hiShare > 0.8) { // all sizzle and no thump: pull the hats back a little
+        if (c.role === 'drums' && c.active && performance.now() - (E.layers[L].mods[c.voice]?._hiTame || 0) > 20000) { const d = E.layers[L].mods[c.voice]; if (d) { d._hiTame = performance.now(); tameHighDrums(d); } }
+        if (c.role === 'drums' && c.active && c.hiShare > 0.6) { // all sizzle and no thump: pull the hats back a little
           const d = E.layers[L].mods[c.voice];
-          if (d?.lvl && performance.now() - (d._hatFix || 0) > 30000) { d._hatFix = performance.now(); ['CH', 'OH', 'CY'].forEach(ins => { const i = d.INST.indexOf(ins); if (i >= 0) d.lvl[i] = Math.max(0.35, d.lvl[i] * 0.8); }); AI.log('mix', 'the hi-hats were sizzling over everything: pulled them back'); }
+          if (d?.lvl && performance.now() - (d._hatFix || 0) > 30000) { d._hatFix = performance.now(); ['CH', 'OH', 'CY', 'CB', 'RS'].forEach(ins => { const i = d.INST.indexOf(ins); if (i >= 0) d.lvl[i] = Math.max(0.35, d.lvl[i] * 0.8); }); AI.log('mix', 'the hi-hats were sizzling over everything: pulled them back'); }
         }
       }
     }
@@ -211,5 +226,5 @@ const Mix = (() => {
     if (AI.busy) { wantSoon(E.V, 0); AI.log('sys', 'the performer will rebalance the mix after its current move'); return; }
     AI.setBusy(true); try { await pass({ why: 'you asked' }); } finally { AI.setBusy(false); }
   };
-  return Object.assign(M, { measure, plan, pass, needs, wantSoon, ungrate, shrillFix, describe, channels, roleOf, TARGET });
+  return Object.assign(M, { tameHighDrums, measure, plan, pass, needs, wantSoon, ungrate, shrillFix, describe, channels, roleOf, TARGET });
 })();

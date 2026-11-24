@@ -42,6 +42,26 @@ PANELS = {
     'tape':    (230, 'enamel',    (92, 30, 26),    0.65, 0.50, False),  # oxblood tape deck
     'reel':    (410, 'enamel',    (70, 44, 26),    0.60, 0.45, False),  # walnut-brown tape keyboard
     'lpg':     (300, 'hammer',    (58, 92, 70),    0.55, 0.40, False),  # green hammertone
+    # effects
+    'halls':    (360, 'enamel',  (206, 214, 224), 0.50, 0.25, True),   # pale blue-grey, old studio gear
+    'echoes':   (380, 'hammer',  (128, 96, 40),   0.65, 0.55, False),  # bronze hammertone tape echo
+    'ensemble': (340, 'enamel',  (34, 96, 92),    0.55, 0.35, False),  # sea green
+    'phaser':   (330, 'enamel',  (92, 40, 120),   0.60, 0.40, False),  # purple pedal
+    'heat':     (360, 'enamel',  (176, 52, 20),   0.80, 0.70, False),  # burnt orange, beaten up
+    'bode':     (330, 'brushed', (120, 132, 140), 0.50, 0.30, False),  # lab grey
+    'sympathy': (360, 'enamel',  (222, 204, 160), 0.55, 0.35, True),   # ivory
+    'vowel':    (330, 'enamel',  (150, 40, 100),  0.60, 0.40, False),  # magenta
+    'pump':     (350, 'enamel',  (40, 70, 30),    0.65, 0.50, False),  # dark olive
+    'stutter':  (340, 'enamel',  (140, 20, 36),   0.75, 0.60, False),  # crimson
+    'prism':    (340, 'hammer',  (70, 62, 120),   0.55, 0.35, False),  # indigo hammertone
+    'cassette': (330, 'enamel',  (200, 178, 140), 0.70, 0.55, True),   # tan, sun-faded
+    'horizon':  (350, 'enamel',  (14, 14, 30),    0.70, 0.60, False),  # deep space black
+    # modulation
+    'orbit':    (430, 'enamel',  (20, 52, 64),    0.60, 0.40, False),  # petrol
+    'performer':(440, 'hammer',  (64, 50, 30),    0.60, 0.45, False),  # dark bronze
+    'attractor':(330, 'enamel',  (44, 24, 64),    0.65, 0.50, False),  # aubergine
+    'macros':   (360, 'enamel',  (230, 200, 200), 0.50, 0.30, True),   # faded pink
+    'follower': (280, 'brushed', (110, 120, 112), 0.55, 0.40, False),  # steel
 }
 
 

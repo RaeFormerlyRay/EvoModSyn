@@ -12,7 +12,8 @@ const Layers = (() => {
     return E.within(L, () => ({
       mods: E.order.map(id => E.mods[id]).filter(m => !SKIP.has(m.kind)).map(m => ({
         id: m.id, kind: m.kind, name: m.name, stripe: m.stripe, model: m.params.model?.choice,
-        params: Object.fromEntries(m.paramOrder.map(k => [k, m.params[k].n])), data: dataOf(m) && JSON.parse(JSON.stringify(dataOf(m)))
+        params: Object.fromEntries(m.paramOrder.map(k => [k, m.params[k].n])), depths: Object.fromEntries(m.paramOrder.filter(k => m.ins['@' + k]).map(k => [k, m.params[k].modDepth])),
+        data: dataOf(m) && JSON.parse(JSON.stringify(dataOf(m))), extra: m.getData && JSON.parse(JSON.stringify(m.getData()))
       })),
       cables: E.cables.filter(c => !SKIP.has(E.mods[c.from.mod]?.kind) && !SKIP.has(E.mods[c.to.mod]?.kind)).map(c => ({ from: { ...c.from }, to: { ...c.to }, color: c.color }))
     }));
@@ -30,11 +31,13 @@ const Layers = (() => {
       for (const s of snap.mods) {
         const m = E.mods[s.id]; if (!m) continue;
         for (const [k, n] of Object.entries(s.params)) m.params[k]?.setNorm(n, true);
+        for (const [k, d] of Object.entries(s.depths || {})) { if (m.params[k]) { m.params[k].modDepth = d; } }
+        if (s.extra && m.setData) m.setData(JSON.parse(JSON.stringify(s.extra)));
         const d = s.data && JSON.parse(JSON.stringify(s.data));
         if (d && m.kind === 'StepSeq') { m.pats = d.pats; m.cur = d.cur; m.song = d.song; m.songOn = d.songOn; m.next = null; m.ui?.renderAll(); }
         if (d && m.kind === 'Drums') { m.pats = d.pats; m.cur = d.cur; m.song = d.song; m.songOn = d.songOn; m.mute = d.mute; if (d.lvl) m.lvl = d.lvl; m.next = null; m.ui?.renderGrid(); }
       }
-      for (const c of snap.cables) E.connect(c.from, c.to, { color: c.color });
+      for (const c of snap.cables) { E.connect(c.from, c.to, { color: c.color }); if (c.to.port[0] === '@') { const p = E.mods[c.to.mod]?.params[c.to.port.slice(1)]; if (p) E.setModDepth(c.to.mod, c.to.port.slice(1), p.modDepth); } }
     });
     if (L === E.V) { UI.syncCables(); UI.layout(); }
     UI.status(); paint();

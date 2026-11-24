@@ -372,3 +372,29 @@ body[data-layer="B"] .rackwrap{box-shadow:inset 0 0 0 2px #a8742055}
 .songsec.lyb{background-image:linear-gradient(#ffb03b14,#ffb03b14)}
 .log div.mix{color:#c9e7a6}
 @media (max-width:820px){.xfade input{width:100px}.lnote{display:none}}
+
+/* knob modulation: a cable dropped on a knob, Massive-style */
+.knob .ring .mr{fill:none;stroke-width:5;stroke-linecap:round;opacity:.85}
+.knob .ring .md{stroke:#0008;stroke-width:1.5}
+.knob.modded .dial{box-shadow:0 0 0 1px #ffffff30,0 0 10px #52f2ff40}
+#cables .cab.modlink .main{stroke-width:3.2;stroke-dasharray:9 5}
+#cables .cab.modlink .shadow{stroke-width:5}
+#cables .cab.modlink .shine{opacity:.25}
+#cables .cab.modlink .plug:last-of-type{r:4}
+.jack.cv .hole:hover,.knob.droppable .dial{outline:2px dashed #52f2ff99;outline-offset:3px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,30px);background:#101418ee;border:1px solid #2a8a95;color:#dffcff;font:12px/1.4 var(--f-mono);padding:8px 14px;border-radius:6px;opacity:0;pointer-events:none;transition:.25s;z-index:60;max-width:min(560px,90vw);text-align:center}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* effects and modulation suite */
+canvas.scr.flash{box-shadow:0 0 0 1px #fff8,0 0 14px #fff6}
+.kgrid.orbitgrid{grid-template-columns:repeat(6,1fr)}
+.perfrow{display:flex;align-items:stretch;gap:2px;height:38px}
+.perflab{font:600 10px var(--f-mono);color:#ffb03b;width:18px;display:flex;align-items:center}
+.pstep{flex:1;position:relative;background:#0b1210;border:1px solid #000;border-radius:2px;cursor:ns-resize;overflow:hidden;touch-action:none}
+.pstep i{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(#ffb03b,#a8742088)}
+.pstep b{position:absolute;left:0;right:0;top:1px;text-align:center;font:9px var(--f-mono);color:#fff;text-shadow:0 1px 2px #000;pointer-events:none}
+.pstep.off i{opacity:.15}
+.pstep:nth-child(4n+2){border-left-color:#5c4a2a}
+.pstep.now{outline:1px solid #fff;outline-offset:-1px}
+.pstep.ai{box-shadow:0 0 0 2px var(--ai)}
+.perfsel{font:10px var(--f-mono);background:#14161b;color:#e9e6dc;border:1px solid #333;width:66px}

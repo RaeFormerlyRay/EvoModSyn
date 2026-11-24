@@ -193,6 +193,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       Mix.wantSoon(s.layer || 0, 2 * 16 * E.sixteenth() * 1000); // rebalance once the new section has settled
       log(`<b>${esc(s.name)}</b> · ${esc(s.chords)} · energy ${Math.round(s.energy * 100)}%`);
       AI.think(`Song · ${s.name}`, `${s.name}: ${s.chords}. ${s.why}.`);
+      try { AI.onSection?.(s); } catch (e) { console.error(e); }
       Object.keys(S.fresh).forEach(k => { S.fresh[k] = 0; });
       const nxt = S.sections[i + 1] || (S.loop ? S.sections.find(x => x.role === 'verse') : null);
       if (nxt) planAhead(S.sections.indexOf(nxt));
@@ -280,7 +281,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   function freshen(id, kind, bars) {
     const m = E.mods[id]; let acts;
     if (id === 'drums') {
-      const ins = pick(['CH', 'OH', 'RS', 'CP', 'SD', 'CB', 'LT']), r = m.INST.indexOf(ins), cur = m.pats[m.cur][r].map(v => v === 2 ? 'X' : v ? 'x' : '.').join('');
+      const ins = pick(['CH', 'OH', 'RS', 'CP', 'SD', 'LT', 'HT']), r = m.INST.indexOf(ins), cur = m.pats[m.cur][r].map(v => v === 2 ? 'X' : v ? 'x' : '.').join('');
       const how = pick(['add ghost notes', 'shift the accents', 'drop a few hits']);
       const nx = how === 'add ghost notes' ? cur.split('').map(c => c === '.' && rnd() < 0.2 ? 'x' : c).join('') : how === 'drop a few hits' ? cur.split('').map(c => c !== '.' && rnd() < 0.3 ? '.' : c).join('') : cur.slice(2) + cur.slice(0, 2);
       acts = [{ do: 'drums', inst: ins, pattern: nx, why: `the drums looped ${bars} bars unchanged: ${how} on ${ins}` }];
