@@ -330,7 +330,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   async function performLoop(p) {
     while (!AI.abort && S.on && !S.done) {
       if (AI.fixQueue.length) { await AI.runAll(AI.fixQueue.splice(0)); continue; }
-      if (Mix.needs(AI.viewTarget())) { await AI.toLayer(S.live); await Mix.pass({ L: E.V, why: 'new section, new balance' }); continue; }
+      if (Mix.needs(AI.viewTarget())) { await AI.toLayer(S.live); await Mix.pass({ L: E.L, why: 'new section, new balance' }); continue; }
       await AI.shapeOnce();
       await UI.sleep((2600 + rnd() * 3200) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.35));
     }

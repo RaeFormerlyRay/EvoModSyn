@@ -6,7 +6,11 @@ const UI = (() => {
   const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const rack = $('#rack'), wrap = $('#rackwrap'), svg = $('#cables'), hand = $('#aihand'), handLbl = $('#aihandlbl'), readout = $('#readout');
   const SVGNS = 'http://www.w3.org/2000/svg';
-  const U = { temp: null, speed: 1 };
+  const lanes = [$('#lane0'), $('#lane1')];
+  const U = { temp: null, speed: 1, split: false, pinView: false };
+  // a layer is on screen when it is the viewed one, or always in split view
+  const vis = L => U.split || L === E.V;
+  U.isVisible = vis;
   // modules, knobs and jacks are kept per layer; these maps follow the layer in context (Engine.L)
   const LU = [0, 1].map(() => ({ modEls: {}, knobs: {}, jacks: {}, jpos: {} }));
   ['modEls', 'knobs', 'jacks', 'jpos'].forEach(k => Object.defineProperty(U, k, { get: () => LU[E.L][k] }));
@@ -285,10 +289,10 @@ const UI = (() => {
   // ---------- build rack ----------
   function renderModule(m, isNew) {
     const id = m.id; buildingId = id;
-    const el = h('div', 'mod' + (isNew ? ' mod-new' : '') + (E.L !== E.V ? ' offlayer' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id; el.dataset.layer = E.L;
+    const el = h('div', 'mod' + (isNew ? ' mod-new' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id; el.dataset.layer = E.L;
     const pk = Panels.key(m); if (pk) { el.style.setProperty('--panel-img', `url("${Panels.url(pk)}")`); el.classList.add('worn'); if (Panels.light(pk)) el.classList.add('light'); }
     el.innerHTML = `<div class="mod-h"><span class="nm">${m.name}</span><span class="sub">${m.sub}</span></div>`;
-    if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; x.onclick = () => U.removeModule(id); el.querySelector('.mod-h').append(x); }
+    if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; const LL = E.L; x.onclick = () => E.within(LL, () => U.removeModule(id)); el.querySelector('.mod-h').append(x); }
     const body = h('div', 'mod-b'); el.append(body);
     for (const sec of m.layout) {
       if (sec.custom) { const box = h('div', 'cust'); box.style.display = 'flex'; box.style.flexDirection = 'column'; box.style.gap = '5px'; body.append(box); customs[sec.custom](m, box); }
@@ -300,7 +304,7 @@ const UI = (() => {
     if (gi.children.length) jr.append(gi); jr.append(go); el.append(jr);
     const mg = el.querySelector('.mixgrid');
     if (mg) { mg.style.display = 'grid'; mg.style.gridTemplateColumns = 'repeat(8,1fr)'; mg.style.justifyItems = 'center'; }
-    rack.insertBefore(el, svg);
+    lanes[E.L].append(el);
     U.modEls[id] = el;
     buildingId = null;
     if (isNew) setTimeout(() => el.classList.remove('mod-new'), 2200);
@@ -311,7 +315,7 @@ const UI = (() => {
     new ResizeObserver(() => U.layout()).observe(rack);
     window.addEventListener('resize', () => U.layout());
     U.layout();
-    E.on('change', ev => { if (E.L !== E.V) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
+    E.on('change', ev => { if (!vis(E.L)) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
     requestAnimationFrame(frame);
   };
   // Add a new module of a registered type to the end of the rack; returns its id
@@ -331,23 +335,32 @@ const UI = (() => {
     for (const k of Object.keys(U.jacks)) if (k.startsWith(id + '.')) { delete U.jacks[k]; delete U.jpos[k]; }
     for (const k of Object.keys(U.knobs)) if (k.startsWith(id + '.')) delete U.knobs[k];
     U.animated = U.animated.filter(f => f._mod !== id || f._layer !== E.L);
-    if (E.L === E.V) { U.syncCables(); U.layout(); U.status(); }
+    if (vis(E.L)) { U.syncCables(); U.layout(); U.status(); }
     return true;
   };
   // show one layer's rack: the other layer keeps running (and sounding, if its master is up) off screen
-  U.showLayer = function (L) {
-    E.V = L; E.L = L;
-    rack.querySelectorAll('.mod').forEach(el => el.classList.toggle('offlayer', +el.dataset.layer !== L));
-    for (const g of cabEls.values()) g.remove(); cabEls.clear();
-    U.handOff(); U.syncCables(); U.layout(); U.status();
+  // keepWork: change only what is on screen, and leave the AI working on its own layer (E.L)
+  U.showLayer = function (L, keepWork) {
+    E.V = L; if (!keepWork) E.L = L;
+    paintLanes();
+    if (!vis(E.L)) U.handOff();
+    U.syncCables(); U.layout(); U.status();
     document.body.dataset.layer = 'AB'[L];
     E.fire('view', L);
   };
 
+  function paintLanes() {
+    lanes.forEach((ln, L) => { ln.hidden = !vis(L); ln.classList.toggle('focus', L === E.V); });
+    rack.classList.toggle('splitab', U.split);
+  }
+  U.setSplit = function (on) { U.split = !!on; paintLanes(); U.syncCables(); U.layout(); U.status(); E.fire('view', E.V); };
   U.layout = function () {
-    if (E.L !== E.V) return;
     const rr = rack.getBoundingClientRect();
-    for (const k in U.jacks) { const r = U.jacks[k].querySelector('.hole').getBoundingClientRect(); U.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
+    for (const L of [0, 1]) {
+      if (!vis(L)) continue;
+      const J = LU[L];
+      for (const k in J.jacks) { const r = J.jacks[k].querySelector('.hole').getBoundingClientRect(); J.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
+    }
     svg.setAttribute('width', rack.scrollWidth); svg.setAttribute('height', rack.scrollHeight);
     svg.style.width = rack.scrollWidth + 'px'; svg.style.height = rack.scrollHeight + 'px';
   };
@@ -362,10 +375,10 @@ const UI = (() => {
     svg.append(g); return g;
   }
   U.syncCables = function () {
-    if (E.L !== E.V) return;
-    const ids = new Set(E.cables.map(c => c.id));
-    for (const [id, g] of cabEls) if (!ids.has(id)) { g.remove(); cabEls.delete(id); }
-    for (const c of E.cables) if (!cabEls.has(c.id)) cabEls.set(c.id, mkCableEl(c.color));
+    const want = new Map();
+    for (const L of [0, 1]) if (vis(L)) for (const c of E.layers[L].cables) want.set(c.id, c);
+    for (const [id, g] of cabEls) if (!want.has(id)) { g.remove(); cabEls.delete(id); }
+    for (const c of want.values()) if (!cabEls.has(c.id)) cabEls.set(c.id, mkCableEl(c.color));
   };
   function cablePath(a, b, born) {
     const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy);
@@ -382,11 +395,15 @@ const UI = (() => {
   const tempEls = [null, null, null];
   function drawAllCables() {
     const t = performance.now();
-    for (const c of E.cables) {
-      const g = cabEls.get(c.id); if (!g) continue;
-      const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port); if (!a || !b) continue;
-      const glowing = (c.ai && t - c.ai < 1800) || c.glowUntil > t;
-      drawCable(g, a, b, c.born, glowing);
+    for (const L of [0, 1]) {
+      if (!vis(L)) continue;
+      const J = LU[L].jpos;
+      for (const c of E.layers[L].cables) {
+        const g = cabEls.get(c.id); if (!g) continue;
+        const a = J[`${c.from.mod}.out.${c.from.port}`], b = J[`${c.to.mod}.in.${c.to.port}`]; if (!a || !b) continue;
+        const glowing = (c.ai && t - c.ai < 1800) || c.glowUntil > t;
+        drawCable(g, a, b, c.born, glowing);
+      }
     }
     [U.temp, U.hands?.[0].temp, U.hands?.[1].temp].forEach((tp, k) => {
       if (tp) { if (!tempEls[k]) tempEls[k] = mkCableEl(tp.color); drawCable(tempEls[k], tp.a, tp.b, null, tp.ai); }
@@ -399,10 +416,13 @@ const UI = (() => {
   function startDrag(e) {
     e.preventDefault();
     const el = e.currentTarget, mod = el.dataset.mod, port = el.dataset.port, dir = el.dataset.dir;
+    const L = +el.closest('.mod').dataset.layer; // patch inside the layer this jack belongs to
     let anchor = { mod, port, dir };
-    if (dir === 'in') { const c = E.findCable(mod, port); if (c) { E.disconnect(c); anchor = { mod: c.from.mod, port: c.from.port, dir: 'out' }; } }
-    const a = U.jackXY(anchor.mod, anchor.dir, anchor.port);
-    drag = { anchor };
+    const a = E.within(L, () => {
+      if (dir === 'in') { const c = E.findCable(mod, port); if (c) { E.disconnect(c); anchor = { mod: c.from.mod, port: c.from.port, dir: 'out' }; } }
+      return LU[L].jpos[`${anchor.mod}.${anchor.dir}.${anchor.port}`];
+    });
+    drag = { anchor, L };
     U.temp = { a, b: { ...a }, color: '#e9e6dc' };
     window.addEventListener('pointermove', onDrag); window.addEventListener('pointerup', endDrag, { once: true });
   }
@@ -418,10 +438,10 @@ const UI = (() => {
     window.removeEventListener('pointermove', onDrag);
     const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('.jack');
     hoverEl?.classList.remove('hover'); hoverEl = null;
-    if (t && drag && t.dataset.dir !== drag.anchor.dir) {
+    if (t && drag && t.dataset.dir !== drag.anchor.dir && +t.closest('.mod').dataset.layer === drag.L) {
       const A = drag.anchor, B = { mod: t.dataset.mod, port: t.dataset.port, dir: t.dataset.dir };
       const from = A.dir === 'out' ? A : B, to = A.dir === 'out' ? B : A;
-      const ok = E.connect({ mod: from.mod, port: from.port }, { mod: to.mod, port: to.port });
+      const ok = E.within(drag.L, () => E.connect({ mod: from.mod, port: from.port }, { mod: to.mod, port: to.port }));
       if (!ok) U.flashMsg?.('Those two jacks do not fit: clock/gate jacks (green) only connect to green jacks.');
     }
     drag = null; U.temp = null;
@@ -450,6 +470,8 @@ const UI = (() => {
   function focus(id, hi) { hands[hi].focus = id; Object.entries(U.modEls).forEach(([k, e]) => e.classList.toggle(focusCls[hi], k === id)); }
   async function handTo(hi, x, y, label, ms) {
     const H = hands[hi];
+    // the layer the AI is working on is off screen: move without showing the cursor
+    if (!vis(E.L)) { H.pos.x = x; H.pos.y = y; H.el.classList.remove('on'); return; }
     H.el.classList.add('on'); if (label != null) H.lbl.textContent = (U.twoHands ? (hi ? '② ' : '① ') : '') + label;
     const w = ensureVisible(x, y, hi); if (w) await sleep(w * U.speed);
     const sx = H.pos.x, sy = H.pos.y, dist = Math.hypot(x - sx, y - sy);
@@ -546,7 +568,7 @@ const UI = (() => {
   function frame() {
     E.flushUI();
     drawAllCables();
-    for (const f of U.animated) if (f._layer === E.V) f();
+    for (const f of U.animated) if (vis(f._layer)) f();
     requestAnimationFrame(frame);
   }
 

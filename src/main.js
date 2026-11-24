@@ -42,10 +42,13 @@
   E.on('transport', r => $('#runled').classList.toggle('on', r));
   E.on('bpm', b => { $('#bpmread').textContent = b.toFixed(1) + ' BPM'; });
   $('#bpmread').textContent = E.bpm.toFixed(1) + ' BPM';
+  // remember which layers the AI may use
+  try { const v = localStorage.getItem('patchmind.layermode'); if (v) $('#layermode').value = v; } catch (e) { /* no storage */ }
+  $('#layermode').addEventListener('change', () => { try { localStorage.setItem('patchmind.layermode', $('#layermode').value); } catch (e) { /* no storage */ } });
   $('#resetpatch').onclick = starter;
   const addSel = $('#addmod');
   Object.entries(Mods.TYPES).forEach(([k, t]) => { const o = document.createElement('option'); o.value = k; o.textContent = t.label; addSel.append(o); });
-  addSel.onchange = () => { const t = addSel.value; addSel.value = ''; if (!t) return; const id = UI.createModule(t); const el = UI.modEls[id]; el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); AI.log('sys', `you added ${E.mods[id].name}`); };
+  addSel.onchange = () => { const t = addSel.value; addSel.value = ''; if (!t) return; E.within(E.V, () => { const id = UI.createModule(t); const el = UI.modEls[id]; el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); AI.log('sys', `you added ${E.mods[id].name} to ${E.layerName(E.V)}`); }); };
   $('#clearpatch').onclick = () => E.clearCables();
   // every knob on every module back to its default (patterns and cables stay)
   $('#resetknobs').onclick = () => {

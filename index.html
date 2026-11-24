@@ -50,7 +50,7 @@
       </select>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" id="layerson" checked> Two layers</label>
+      <select id="layermode" aria-label="Which layers the AI may use" title="Which layers the AI may use"><option value="ab">AI uses Layers A + B</option><option value="a">AI uses Layer A only</option></select>
       <label class="check"><input type="checkbox" id="automix" checked> Auto-mix</label>
       <button class="btn" type="button" id="mixnow">Mix now</button>
       <button class="btn" type="button" id="undoai" title="Put back the AI's last move; it learns you did not like it">Undo AI move</button>
@@ -112,12 +112,14 @@
     <div class="ltabs" role="tablist" aria-label="Rack layers"><button class="ltab on" type="button" data-l="0" role="tab" aria-selected="true">Layer A</button><button class="ltab" type="button" data-l="1" role="tab" aria-selected="false">Layer B</button></div>
     <label class="xfade" title="Crossfade the two layers' masters">A <input type="range" id="xfade" min="0" max="1000" value="0" aria-label="Crossfade between layer A and layer B"> B</label>
     <span class="lmeters" aria-hidden="true"><i id="lma"></i><i id="lmb"></i></span>
+    <button class="btn" type="button" id="splitab" aria-pressed="false" title="Show Layer A and Layer B side by side">Split A | B</button>
     <button class="btn" type="button" id="dupab" title="Duplicate the whole Layer A rack into Layer B">Copy A → B</button>
     <span class="lnote" id="lnote">Layer B is empty</span>
   </div>
   <div class="rackrow" id="rackrow">
   <section class="rackwrap" id="rackwrap">
     <div id="rack">
+      <div class="rlane" id="lane0" data-name="Layer A"></div><div class="rlane" id="lane1" data-name="Layer B" hidden></div>
       <svg id="cables"></svg>
       <div id="aihand"><span id="aihandlbl"></span></div>
     </div>

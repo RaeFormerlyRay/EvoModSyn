@@ -350,7 +350,15 @@ canvas.scr{display:block;width:100%;background:#0b1210;border:1px solid #000;bor
 @media (max-width:820px){.rackrow.split{flex-direction:column}.rackrow.split .handcam{flex:none;height:45vh;border-left:0;border-top:2px solid #ffb03b55}}
 
 /* layers: two independent racks, a tab bar and a crossfader */
-.mod.offlayer{display:none}
+.rlane{flex:1 1 100%;min-width:0;display:flex;flex-wrap:wrap;align-content:flex-start;gap:16px 10px;position:relative}
+.rlane[hidden]{display:none}
+#rack.splitab{flex-wrap:nowrap;align-items:stretch;gap:0}
+#rack.splitab .rlane{flex:1 1 0;min-width:0;zoom:.75}
+#rack.splitab #lane1{border-left:2px dashed #a8742088;padding-left:12px;margin-left:12px}
+#rack.splitab .rlane::before{content:attr(data-name);position:absolute;top:-16px;left:0;font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#52f2ff}
+#rack.splitab #lane1::before{left:12px;color:#ffb03b}
+#rack.splitab .rlane.focus::before{text-decoration:underline}
+#splitab[aria-pressed="true"]{background:linear-gradient(#1d5e66,#123c42);border-color:#2a8a95;color:#dffcff}
 .layerbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 12px;background:#14161b;border-bottom:1px solid #000;font-family:var(--f-mono);font-size:11px;color:#b9b4a8}
 .ltabs{display:flex;gap:4px}
 .ltab{font:inherit;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;padding:5px 12px;border-radius:4px;border:1px solid #2b2f37;background:#1b1e24;color:#cfcabd;cursor:pointer}
@@ -410,7 +418,7 @@ body[data-layer="B"] .rackwrap{box-shadow:inset 0 0 0 2px #a8742055}
       </select>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" id="layerson" checked> Two layers</label>
+      <select id="layermode" aria-label="Which layers the AI may use" title="Which layers the AI may use"><option value="ab">AI uses Layers A + B</option><option value="a">AI uses Layer A only</option></select>
       <label class="check"><input type="checkbox" id="automix" checked> Auto-mix</label>
       <button class="btn" type="button" id="mixnow">Mix now</button>
       <button class="btn" type="button" id="undoai" title="Put back the AI's last move; it learns you did not like it">Undo AI move</button>
@@ -472,12 +480,14 @@ body[data-layer="B"] .rackwrap{box-shadow:inset 0 0 0 2px #a8742055}
     <div class="ltabs" role="tablist" aria-label="Rack layers"><button class="ltab on" type="button" data-l="0" role="tab" aria-selected="true">Layer A</button><button class="ltab" type="button" data-l="1" role="tab" aria-selected="false">Layer B</button></div>
     <label class="xfade" title="Crossfade the two layers' masters">A <input type="range" id="xfade" min="0" max="1000" value="0" aria-label="Crossfade between layer A and layer B"> B</label>
     <span class="lmeters" aria-hidden="true"><i id="lma"></i><i id="lmb"></i></span>
+    <button class="btn" type="button" id="splitab" aria-pressed="false" title="Show Layer A and Layer B side by side">Split A | B</button>
     <button class="btn" type="button" id="dupab" title="Duplicate the whole Layer A rack into Layer B">Copy A → B</button>
     <span class="lnote" id="lnote">Layer B is empty</span>
   </div>
   <div class="rackrow" id="rackrow">
   <section class="rackwrap" id="rackwrap">
     <div id="rack">
+      <div class="rlane" id="lane0" data-name="Layer A"></div><div class="rlane" id="lane1" data-name="Layer B" hidden></div>
       <svg id="cables"></svg>
       <div id="aihand"><span id="aihandlbl"></span></div>
     </div>
@@ -1945,7 +1955,11 @@ const UI = (() => {
   const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const rack = $('#rack'), wrap = $('#rackwrap'), svg = $('#cables'), hand = $('#aihand'), handLbl = $('#aihandlbl'), readout = $('#readout');
   const SVGNS = 'http://www.w3.org/2000/svg';
-  const U = { temp: null, speed: 1 };
+  const lanes = [$('#lane0'), $('#lane1')];
+  const U = { temp: null, speed: 1, split: false, pinView: false };
+  // a layer is on screen when it is the viewed one, or always in split view
+  const vis = L => U.split || L === E.V;
+  U.isVisible = vis;
   // modules, knobs and jacks are kept per layer; these maps follow the layer in context (Engine.L)
   const LU = [0, 1].map(() => ({ modEls: {}, knobs: {}, jacks: {}, jpos: {} }));
   ['modEls', 'knobs', 'jacks', 'jpos'].forEach(k => Object.defineProperty(U, k, { get: () => LU[E.L][k] }));
@@ -2224,10 +2238,10 @@ const UI = (() => {
   // ---------- build rack ----------
   function renderModule(m, isNew) {
     const id = m.id; buildingId = id;
-    const el = h('div', 'mod' + (isNew ? ' mod-new' : '') + (E.L !== E.V ? ' offlayer' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id; el.dataset.layer = E.L;
+    const el = h('div', 'mod' + (isNew ? ' mod-new' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id; el.dataset.layer = E.L;
     const pk = Panels.key(m); if (pk) { el.style.setProperty('--panel-img', `url("${Panels.url(pk)}")`); el.classList.add('worn'); if (Panels.light(pk)) el.classList.add('light'); }
     el.innerHTML = `<div class="mod-h"><span class="nm">${m.name}</span><span class="sub">${m.sub}</span></div>`;
-    if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; x.onclick = () => U.removeModule(id); el.querySelector('.mod-h').append(x); }
+    if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; const LL = E.L; x.onclick = () => E.within(LL, () => U.removeModule(id)); el.querySelector('.mod-h').append(x); }
     const body = h('div', 'mod-b'); el.append(body);
     for (const sec of m.layout) {
       if (sec.custom) { const box = h('div', 'cust'); box.style.display = 'flex'; box.style.flexDirection = 'column'; box.style.gap = '5px'; body.append(box); customs[sec.custom](m, box); }
@@ -2239,7 +2253,7 @@ const UI = (() => {
     if (gi.children.length) jr.append(gi); jr.append(go); el.append(jr);
     const mg = el.querySelector('.mixgrid');
     if (mg) { mg.style.display = 'grid'; mg.style.gridTemplateColumns = 'repeat(8,1fr)'; mg.style.justifyItems = 'center'; }
-    rack.insertBefore(el, svg);
+    lanes[E.L].append(el);
     U.modEls[id] = el;
     buildingId = null;
     if (isNew) setTimeout(() => el.classList.remove('mod-new'), 2200);
@@ -2250,7 +2264,7 @@ const UI = (() => {
     new ResizeObserver(() => U.layout()).observe(rack);
     window.addEventListener('resize', () => U.layout());
     U.layout();
-    E.on('change', ev => { if (E.L !== E.V) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
+    E.on('change', ev => { if (!vis(E.L)) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
     requestAnimationFrame(frame);
   };
   // Add a new module of a registered type to the end of the rack; returns its id
@@ -2270,23 +2284,32 @@ const UI = (() => {
     for (const k of Object.keys(U.jacks)) if (k.startsWith(id + '.')) { delete U.jacks[k]; delete U.jpos[k]; }
     for (const k of Object.keys(U.knobs)) if (k.startsWith(id + '.')) delete U.knobs[k];
     U.animated = U.animated.filter(f => f._mod !== id || f._layer !== E.L);
-    if (E.L === E.V) { U.syncCables(); U.layout(); U.status(); }
+    if (vis(E.L)) { U.syncCables(); U.layout(); U.status(); }
     return true;
   };
   // show one layer's rack: the other layer keeps running (and sounding, if its master is up) off screen
-  U.showLayer = function (L) {
-    E.V = L; E.L = L;
-    rack.querySelectorAll('.mod').forEach(el => el.classList.toggle('offlayer', +el.dataset.layer !== L));
-    for (const g of cabEls.values()) g.remove(); cabEls.clear();
-    U.handOff(); U.syncCables(); U.layout(); U.status();
+  // keepWork: change only what is on screen, and leave the AI working on its own layer (E.L)
+  U.showLayer = function (L, keepWork) {
+    E.V = L; if (!keepWork) E.L = L;
+    paintLanes();
+    if (!vis(E.L)) U.handOff();
+    U.syncCables(); U.layout(); U.status();
     document.body.dataset.layer = 'AB'[L];
     E.fire('view', L);
   };
 
+  function paintLanes() {
+    lanes.forEach((ln, L) => { ln.hidden = !vis(L); ln.classList.toggle('focus', L === E.V); });
+    rack.classList.toggle('splitab', U.split);
+  }
+  U.setSplit = function (on) { U.split = !!on; paintLanes(); U.syncCables(); U.layout(); U.status(); E.fire('view', E.V); };
   U.layout = function () {
-    if (E.L !== E.V) return;
     const rr = rack.getBoundingClientRect();
-    for (const k in U.jacks) { const r = U.jacks[k].querySelector('.hole').getBoundingClientRect(); U.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
+    for (const L of [0, 1]) {
+      if (!vis(L)) continue;
+      const J = LU[L];
+      for (const k in J.jacks) { const r = J.jacks[k].querySelector('.hole').getBoundingClientRect(); J.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
+    }
     svg.setAttribute('width', rack.scrollWidth); svg.setAttribute('height', rack.scrollHeight);
     svg.style.width = rack.scrollWidth + 'px'; svg.style.height = rack.scrollHeight + 'px';
   };
@@ -2301,10 +2324,10 @@ const UI = (() => {
     svg.append(g); return g;
   }
   U.syncCables = function () {
-    if (E.L !== E.V) return;
-    const ids = new Set(E.cables.map(c => c.id));
-    for (const [id, g] of cabEls) if (!ids.has(id)) { g.remove(); cabEls.delete(id); }
-    for (const c of E.cables) if (!cabEls.has(c.id)) cabEls.set(c.id, mkCableEl(c.color));
+    const want = new Map();
+    for (const L of [0, 1]) if (vis(L)) for (const c of E.layers[L].cables) want.set(c.id, c);
+    for (const [id, g] of cabEls) if (!want.has(id)) { g.remove(); cabEls.delete(id); }
+    for (const c of want.values()) if (!cabEls.has(c.id)) cabEls.set(c.id, mkCableEl(c.color));
   };
   function cablePath(a, b, born) {
     const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy);
@@ -2321,11 +2344,15 @@ const UI = (() => {
   const tempEls = [null, null, null];
   function drawAllCables() {
     const t = performance.now();
-    for (const c of E.cables) {
-      const g = cabEls.get(c.id); if (!g) continue;
-      const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port); if (!a || !b) continue;
-      const glowing = (c.ai && t - c.ai < 1800) || c.glowUntil > t;
-      drawCable(g, a, b, c.born, glowing);
+    for (const L of [0, 1]) {
+      if (!vis(L)) continue;
+      const J = LU[L].jpos;
+      for (const c of E.layers[L].cables) {
+        const g = cabEls.get(c.id); if (!g) continue;
+        const a = J[`${c.from.mod}.out.${c.from.port}`], b = J[`${c.to.mod}.in.${c.to.port}`]; if (!a || !b) continue;
+        const glowing = (c.ai && t - c.ai < 1800) || c.glowUntil > t;
+        drawCable(g, a, b, c.born, glowing);
+      }
     }
     [U.temp, U.hands?.[0].temp, U.hands?.[1].temp].forEach((tp, k) => {
       if (tp) { if (!tempEls[k]) tempEls[k] = mkCableEl(tp.color); drawCable(tempEls[k], tp.a, tp.b, null, tp.ai); }
@@ -2338,10 +2365,13 @@ const UI = (() => {
   function startDrag(e) {
     e.preventDefault();
     const el = e.currentTarget, mod = el.dataset.mod, port = el.dataset.port, dir = el.dataset.dir;
+    const L = +el.closest('.mod').dataset.layer; // patch inside the layer this jack belongs to
     let anchor = { mod, port, dir };
-    if (dir === 'in') { const c = E.findCable(mod, port); if (c) { E.disconnect(c); anchor = { mod: c.from.mod, port: c.from.port, dir: 'out' }; } }
-    const a = U.jackXY(anchor.mod, anchor.dir, anchor.port);
-    drag = { anchor };
+    const a = E.within(L, () => {
+      if (dir === 'in') { const c = E.findCable(mod, port); if (c) { E.disconnect(c); anchor = { mod: c.from.mod, port: c.from.port, dir: 'out' }; } }
+      return LU[L].jpos[`${anchor.mod}.${anchor.dir}.${anchor.port}`];
+    });
+    drag = { anchor, L };
     U.temp = { a, b: { ...a }, color: '#e9e6dc' };
     window.addEventListener('pointermove', onDrag); window.addEventListener('pointerup', endDrag, { once: true });
   }
@@ -2357,10 +2387,10 @@ const UI = (() => {
     window.removeEventListener('pointermove', onDrag);
     const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('.jack');
     hoverEl?.classList.remove('hover'); hoverEl = null;
-    if (t && drag && t.dataset.dir !== drag.anchor.dir) {
+    if (t && drag && t.dataset.dir !== drag.anchor.dir && +t.closest('.mod').dataset.layer === drag.L) {
       const A = drag.anchor, B = { mod: t.dataset.mod, port: t.dataset.port, dir: t.dataset.dir };
       const from = A.dir === 'out' ? A : B, to = A.dir === 'out' ? B : A;
-      const ok = E.connect({ mod: from.mod, port: from.port }, { mod: to.mod, port: to.port });
+      const ok = E.within(drag.L, () => E.connect({ mod: from.mod, port: from.port }, { mod: to.mod, port: to.port }));
       if (!ok) U.flashMsg?.('Those two jacks do not fit: clock/gate jacks (green) only connect to green jacks.');
     }
     drag = null; U.temp = null;
@@ -2389,6 +2419,8 @@ const UI = (() => {
   function focus(id, hi) { hands[hi].focus = id; Object.entries(U.modEls).forEach(([k, e]) => e.classList.toggle(focusCls[hi], k === id)); }
   async function handTo(hi, x, y, label, ms) {
     const H = hands[hi];
+    // the layer the AI is working on is off screen: move without showing the cursor
+    if (!vis(E.L)) { H.pos.x = x; H.pos.y = y; H.el.classList.remove('on'); return; }
     H.el.classList.add('on'); if (label != null) H.lbl.textContent = (U.twoHands ? (hi ? '② ' : '① ') : '') + label;
     const w = ensureVisible(x, y, hi); if (w) await sleep(w * U.speed);
     const sx = H.pos.x, sy = H.pos.y, dist = Math.hypot(x - sx, y - sy);
@@ -2485,7 +2517,7 @@ const UI = (() => {
   function frame() {
     E.flushUI();
     drawAllCables();
-    for (const f of U.animated) if (f._layer === E.V) f();
+    for (const f of U.animated) if (vis(f._layer)) f();
     requestAnimationFrame(frame);
   }
 
@@ -3125,7 +3157,7 @@ const AI = (() => {
   };
   const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   A.think = (state, text) => { $('#aistate').textContent = state; if (text != null) $('#aitext').textContent = text; };
-  const setBusy = b => { A.busy = b; $('#thought').classList.toggle('busy', b); $('#run').disabled = b; $('#stop').disabled = !b; if (!b) UI.handOff(); };
+  const setBusy = b => { A.busy = b; if (!b) { UI.pinView = false; E.L = E.V; } $('#thought').classList.toggle('busy', b); $('#run').disabled = b; $('#stop').disabled = !b; if (!b) UI.handOff(); };
 
   // ======================= EARS =======================
   const ears = { rms: -90, peak: -90, cent: 0, sub: 0, low: 0, mid: 0, high: 0, flux: 0, energy: 0, bright: 0, clip: 0 };
@@ -3400,12 +3432,14 @@ const AI = (() => {
   // Switch the layer the hands work on (and the view) once both hands have finished what they are doing.
   // Work queued after this lands on the new layer.
   A.pendingView = null;
-  const viewTarget = () => A.pendingView ?? E.V;
+  const viewTarget = () => A.pendingView ?? E.L; // the layer the AI is working on (or about to)
   function toLayer(L, why) {
     if (!E.hasLayer(L) || viewTarget() === L) return Promise.resolve();
     A.pendingView = L;
     const go = Promise.all([handLock[0], handLock[1]]).then(() => {
-      if (E.V !== L) { UI.showLayer(L); A.log('sys', `now on <b>${E.layerName(L)}</b>${why ? ' · ' + esc(why) : ''}`); }
+      // the view follows the AI unless you picked a layer to watch, or both are on screen
+      if (UI.pinView || UI.split) { if (E.L !== L) { E.L = L; if (UI.split) UI.showLayer(L); A.log('sys', `working on <b>${E.layerName(L)}</b>${why ? ' · ' + esc(why) : ''}`); } }
+      else if (E.V !== L) { UI.showLayer(L); A.log('sys', `now on <b>${E.layerName(L)}</b>${why ? ' · ' + esc(why) : ''}`); }
       if (A.pendingView === L) A.pendingView = null;
     });
     handLock[0] = handLock[1] = go.catch(() => {});
@@ -4116,7 +4150,9 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     if (A.abort) return finish();
 
     // song structure: plan the form and the first section, then the song engine runs on the bar line
-    const twoLayers = A.songForm && p.mode !== 'tweak' && $('#layerson')?.checked;
+    const aOnly = $('#layermode')?.value === 'a' || /(only|just)\s+(use\s+)?layer\s*a\b|layer\s*a\s+only|no\s+layer\s*b|without\s+layer\s*b/i.test(task);
+    if (aOnly && E.hasLayer(1) && E.layers[1].bus.gain.value > 0.01) { Layers.crossfade(0, 2); A.log('sys', 'Layer A only: faded Layer B out'); }
+    const twoLayers = A.songForm && p.mode !== 'tweak' && !aOnly;
     if (twoLayers && !A.abort) await buildLayerB(p);
     if (A.abort) return finish();
     if (A.songForm && p.mode !== 'tweak') { A.stateName = 'Arranging the song'; await toLayer(0); if (!(await Song.begin(p, { loop: p.mode !== 'perform', layers: twoLayers }))) A.songForm = null; }
@@ -4154,7 +4190,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
           continue;
         }
         if (A.fixQueue.length) { await runAll(A.fixQueue.splice(0)); continue; }
-        if (Mix.needs(E.V)) { await Mix.pass({ why: 'the balance drifted' }); continue; }
+        if (Mix.needs(E.L)) { await Mix.pass({ L: E.L, why: 'the balance drifted' }); continue; }
         await shapeOnce();
         const pause = (2200 + rnd() * 3500) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.4);
         await UI.sleep(pause);
@@ -4169,7 +4205,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     } else {
       A.stateName = 'Listening and tuning';
       const n = p.mode === 'tweak' ? 6 : 5;
-      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); if (Mix.needs(E.V)) await Mix.pass({ why: 'the balance drifted' }); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
+      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); if (Mix.needs(E.L)) await Mix.pass({ L: E.L, why: 'the balance drifted' }); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
       if (!A.abort) { A.think('Patch ready', A.songForm ? `Done. The ${p.genre} song keeps playing and I keep writing each next section while it loops. Ask for changes, or run a live set.` : `Done. The ${p.genre} patch keeps playing. Ask for changes like "make it darker" or "add the geiger counter", or run a live set.`); A.log('sys', 'patch ready'); }
     }
     finish();
@@ -4535,7 +4571,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
   async function performLoop(p) {
     while (!AI.abort && S.on && !S.done) {
       if (AI.fixQueue.length) { await AI.runAll(AI.fixQueue.splice(0)); continue; }
-      if (Mix.needs(AI.viewTarget())) { await AI.toLayer(S.live); await Mix.pass({ L: E.V, why: 'new section, new balance' }); continue; }
+      if (Mix.needs(AI.viewTarget())) { await AI.toLayer(S.live); await Mix.pass({ L: E.L, why: 'new section, new balance' }); continue; }
       await AI.shapeOnce();
       await UI.sleep((2600 + rnd() * 3200) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.35));
     }
@@ -5755,16 +5791,23 @@ const Layers = (() => {
   // ---------- the layer bar ----------
   function show(L) {
     if (L === 1 && !E.hasLayer(1)) { const n = duplicate(0, 1); AI.log('sys', `Layer B created: duplicated all ${n} modules of Layer A into a second, independent system`); }
-    if (AI.busy) { AI.toLayer(L, 'you switched the view'); return; }
+    // while the AI is busy, only the view changes: the AI carries on with the layer it is working on
+    if (AI.busy) { UI.pinView = true; UI.showLayer(L, true); if (E.L !== L && !UI.split) AI.log('sys', `showing ${E.layerName(L)}; the AI keeps working on ${E.layerName(E.L)} (open it or use Split A | B to watch)`); return; }
     UI.showLayer(L);
   }
   function paint() {
     $$('.ltab').forEach(b => { const on = +b.dataset.l === E.V; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
     const n = E.layers[1].order.length;
-    $('#lnote').textContent = n ? `Showing ${E.layerName(E.V)}` : 'Layer B is empty: open it to duplicate Layer A';
+    $('#lnote').textContent = !n ? 'Layer B is empty: open it to duplicate Layer A' : UI.split ? 'Split view: Layer A | Layer B' : `Showing ${E.layerName(E.V)}`;
+    $('#splitab').setAttribute('aria-pressed', UI.split);
     $('.ltab[data-l="1"]').classList.toggle('empty', !n);
   }
   $$('.ltab').forEach(b => { b.onclick = () => show(+b.dataset.l); });
+  $('#splitab').onclick = () => {
+    const on = !UI.split;
+    if (on && !E.hasLayer(1)) { const n = duplicate(0, 1); AI.log('sys', `Layer B created: duplicated all ${n} modules of Layer A`); }
+    UI.setSplit(on); paint();
+  };
   $('#dupab').onclick = () => {
     const n = duplicate(0, 1);
     AI.log('sys', `you copied Layer A into Layer B (${n} modules). Layer B is ${E.layers[1].level > 0.05 ? 'audible' : 'silent until you crossfade to it'}.`);
@@ -5834,10 +5877,13 @@ const Layers = (() => {
   E.on('transport', r => $('#runled').classList.toggle('on', r));
   E.on('bpm', b => { $('#bpmread').textContent = b.toFixed(1) + ' BPM'; });
   $('#bpmread').textContent = E.bpm.toFixed(1) + ' BPM';
+  // remember which layers the AI may use
+  try { const v = localStorage.getItem('patchmind.layermode'); if (v) $('#layermode').value = v; } catch (e) { /* no storage */ }
+  $('#layermode').addEventListener('change', () => { try { localStorage.setItem('patchmind.layermode', $('#layermode').value); } catch (e) { /* no storage */ } });
   $('#resetpatch').onclick = starter;
   const addSel = $('#addmod');
   Object.entries(Mods.TYPES).forEach(([k, t]) => { const o = document.createElement('option'); o.value = k; o.textContent = t.label; addSel.append(o); });
-  addSel.onchange = () => { const t = addSel.value; addSel.value = ''; if (!t) return; const id = UI.createModule(t); const el = UI.modEls[id]; el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); AI.log('sys', `you added ${E.mods[id].name}`); };
+  addSel.onchange = () => { const t = addSel.value; addSel.value = ''; if (!t) return; E.within(E.V, () => { const id = UI.createModule(t); const el = UI.modEls[id]; el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); AI.log('sys', `you added ${E.mods[id].name} to ${E.layerName(E.V)}`); }); };
   $('#clearpatch').onclick = () => E.clearCables();
   // every knob on every module back to its default (patterns and cables stay)
   $('#resetknobs').onclick = () => {

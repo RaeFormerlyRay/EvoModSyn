@@ -17,7 +17,7 @@ const AI = (() => {
   };
   const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   A.think = (state, text) => { $('#aistate').textContent = state; if (text != null) $('#aitext').textContent = text; };
-  const setBusy = b => { A.busy = b; $('#thought').classList.toggle('busy', b); $('#run').disabled = b; $('#stop').disabled = !b; if (!b) UI.handOff(); };
+  const setBusy = b => { A.busy = b; if (!b) { UI.pinView = false; E.L = E.V; } $('#thought').classList.toggle('busy', b); $('#run').disabled = b; $('#stop').disabled = !b; if (!b) UI.handOff(); };
 
   // ======================= EARS =======================
   const ears = { rms: -90, peak: -90, cent: 0, sub: 0, low: 0, mid: 0, high: 0, flux: 0, energy: 0, bright: 0, clip: 0 };
@@ -292,12 +292,14 @@ const AI = (() => {
   // Switch the layer the hands work on (and the view) once both hands have finished what they are doing.
   // Work queued after this lands on the new layer.
   A.pendingView = null;
-  const viewTarget = () => A.pendingView ?? E.V;
+  const viewTarget = () => A.pendingView ?? E.L; // the layer the AI is working on (or about to)
   function toLayer(L, why) {
     if (!E.hasLayer(L) || viewTarget() === L) return Promise.resolve();
     A.pendingView = L;
     const go = Promise.all([handLock[0], handLock[1]]).then(() => {
-      if (E.V !== L) { UI.showLayer(L); A.log('sys', `now on <b>${E.layerName(L)}</b>${why ? ' · ' + esc(why) : ''}`); }
+      // the view follows the AI unless you picked a layer to watch, or both are on screen
+      if (UI.pinView || UI.split) { if (E.L !== L) { E.L = L; if (UI.split) UI.showLayer(L); A.log('sys', `working on <b>${E.layerName(L)}</b>${why ? ' · ' + esc(why) : ''}`); } }
+      else if (E.V !== L) { UI.showLayer(L); A.log('sys', `now on <b>${E.layerName(L)}</b>${why ? ' · ' + esc(why) : ''}`); }
       if (A.pendingView === L) A.pendingView = null;
     });
     handLock[0] = handLock[1] = go.catch(() => {});
@@ -1008,7 +1010,9 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     if (A.abort) return finish();
 
     // song structure: plan the form and the first section, then the song engine runs on the bar line
-    const twoLayers = A.songForm && p.mode !== 'tweak' && $('#layerson')?.checked;
+    const aOnly = $('#layermode')?.value === 'a' || /(only|just)\s+(use\s+)?layer\s*a\b|layer\s*a\s+only|no\s+layer\s*b|without\s+layer\s*b/i.test(task);
+    if (aOnly && E.hasLayer(1) && E.layers[1].bus.gain.value > 0.01) { Layers.crossfade(0, 2); A.log('sys', 'Layer A only: faded Layer B out'); }
+    const twoLayers = A.songForm && p.mode !== 'tweak' && !aOnly;
     if (twoLayers && !A.abort) await buildLayerB(p);
     if (A.abort) return finish();
     if (A.songForm && p.mode !== 'tweak') { A.stateName = 'Arranging the song'; await toLayer(0); if (!(await Song.begin(p, { loop: p.mode !== 'perform', layers: twoLayers }))) A.songForm = null; }
@@ -1046,7 +1050,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
           continue;
         }
         if (A.fixQueue.length) { await runAll(A.fixQueue.splice(0)); continue; }
-        if (Mix.needs(E.V)) { await Mix.pass({ why: 'the balance drifted' }); continue; }
+        if (Mix.needs(E.L)) { await Mix.pass({ L: E.L, why: 'the balance drifted' }); continue; }
         await shapeOnce();
         const pause = (2200 + rnd() * 3500) * (1 + p.tr.calm) * (1 - p.tr.chaos * 0.4);
         await UI.sleep(pause);
@@ -1061,7 +1065,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     } else {
       A.stateName = 'Listening and tuning';
       const n = p.mode === 'tweak' ? 6 : 5;
-      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); if (Mix.needs(E.V)) await Mix.pass({ why: 'the balance drifted' }); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
+      for (let i = 0; i < n && !A.abort; i++) { if (A.fixQueue.length) await runAll(A.fixQueue.splice(0)); if (Mix.needs(E.L)) await Mix.pass({ L: E.L, why: 'the balance drifted' }); await shapeOnce(i === 0 ? 'first listen' : null); await UI.sleep(800); }
       if (!A.abort) { A.think('Patch ready', A.songForm ? `Done. The ${p.genre} song keeps playing and I keep writing each next section while it loops. Ask for changes, or run a live set.` : `Done. The ${p.genre} patch keeps playing. Ask for changes like "make it darker" or "add the geiger counter", or run a live set.`); A.log('sys', 'patch ready'); }
     }
     finish();

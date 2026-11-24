@@ -57,16 +57,23 @@ const Layers = (() => {
   // ---------- the layer bar ----------
   function show(L) {
     if (L === 1 && !E.hasLayer(1)) { const n = duplicate(0, 1); AI.log('sys', `Layer B created: duplicated all ${n} modules of Layer A into a second, independent system`); }
-    if (AI.busy) { AI.toLayer(L, 'you switched the view'); return; }
+    // while the AI is busy, only the view changes: the AI carries on with the layer it is working on
+    if (AI.busy) { UI.pinView = true; UI.showLayer(L, true); if (E.L !== L && !UI.split) AI.log('sys', `showing ${E.layerName(L)}; the AI keeps working on ${E.layerName(E.L)} (open it or use Split A | B to watch)`); return; }
     UI.showLayer(L);
   }
   function paint() {
     $$('.ltab').forEach(b => { const on = +b.dataset.l === E.V; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
     const n = E.layers[1].order.length;
-    $('#lnote').textContent = n ? `Showing ${E.layerName(E.V)}` : 'Layer B is empty: open it to duplicate Layer A';
+    $('#lnote').textContent = !n ? 'Layer B is empty: open it to duplicate Layer A' : UI.split ? 'Split view: Layer A | Layer B' : `Showing ${E.layerName(E.V)}`;
+    $('#splitab').setAttribute('aria-pressed', UI.split);
     $('.ltab[data-l="1"]').classList.toggle('empty', !n);
   }
   $$('.ltab').forEach(b => { b.onclick = () => show(+b.dataset.l); });
+  $('#splitab').onclick = () => {
+    const on = !UI.split;
+    if (on && !E.hasLayer(1)) { const n = duplicate(0, 1); AI.log('sys', `Layer B created: duplicated all ${n} modules of Layer A`); }
+    UI.setSplit(on); paint();
+  };
   $('#dupab').onclick = () => {
     const n = duplicate(0, 1);
     AI.log('sys', `you copied Layer A into Layer B (${n} modules). Layer B is ${E.layers[1].level > 0.05 ? 'audible' : 'silent until you crossfade to it'}.`);
