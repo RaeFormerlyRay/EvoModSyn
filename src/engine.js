@@ -227,7 +227,8 @@ const Engine = (() => {
       if (E.nextTime < now - 0.2) E.nextTime = now + 0.02;
       while (E.nextTime < horizon) {
         const t = E.nextTime, dur = E.sixteenth();
-        const sw = (E.step % 2 === 1) ? E.swing * dur * 0.5 : 0;
+        // swing: 16TH delays every other 16th; 8TH (jazz, hip hop shuffle) delays the off-beat 8th toward a triplet feel
+        const sw = E.swingGrid === '8TH' ? [0, 0.6, 1.2, 0.6][E.step % 4] * E.swing * dur : (E.step % 2 === 1) ? E.swing * dur * 0.5 : 0;
         // both layers run on the same transport so they stay in time and can crossfade on the beat
         for (const Ly of E.layers) { const clock = Ly.mods.clock; if (clock) E.within(Ly.i, () => clock.emitTick(t + sw, E.step, dur)); }
         E.step++;

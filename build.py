@@ -15,4 +15,8 @@ body = body.replace('{/*BUILD:PANELS*/}', '{' + panels + '}')
 out = root / 'dist' / 'patchmind.html'
 out.parent.mkdir(exist_ok=True)
 out.write_text(body.strip() + '\n')
+# the sample library stays outside the page (it loads one bank at a time): copy it next to the build
+import shutil
+shutil.rmtree(out.parent / 'samples', ignore_errors=True)
+shutil.copytree(root / 'samples', out.parent / 'samples')
 print(out, len(body))

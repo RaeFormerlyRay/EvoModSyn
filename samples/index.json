@@ -1,0 +1,600 @@
+[
+ {
+  "name": "PIANO",
+  "label": "Grand piano",
+  "kind": "keys",
+  "family": "keys",
+  "src": "Salamander Grand Piano V3, Alexander Holm (CC-BY 3.0)",
+  "range": [
+   36,
+   90
+  ],
+  "n": 18,
+  "kb": 609
+ },
+ {
+  "name": "EPIANO",
+  "label": "FM electric piano",
+  "kind": "keys",
+  "family": "keys",
+  "src": "VCSL TX81Z FM Piano (CC0)",
+  "range": [
+   36,
+   92
+  ],
+  "n": 8,
+  "kb": 221
+ },
+ {
+  "name": "CLAV",
+  "label": "Clavi",
+  "kind": "keys",
+  "family": "keys",
+  "src": "VCSL TX81Z Clavisynth (CC0)",
+  "range": [
+   36,
+   84
+  ],
+  "n": 7,
+  "kb": 85
+ },
+ {
+  "name": "ORGAN",
+  "label": "Tonewheel organ",
+  "kind": "keys",
+  "family": "keys",
+  "src": "synth (PatchMind)",
+  "range": [
+   36,
+   90
+  ],
+  "n": 10,
+  "kb": 254
+ },
+ {
+  "name": "PIPES",
+  "label": "Chamber organ",
+  "kind": "keys",
+  "family": "keys",
+  "src": "VCSL Renaissance Organ 8' (CC0)",
+  "range": [
+   36,
+   72
+  ],
+  "n": 7,
+  "kb": 193
+ },
+ {
+  "name": "SAX",
+  "label": "Tenor sax",
+  "kind": "keys",
+  "family": "wind",
+  "src": "VCSL Tenor Saxophone (CC0)",
+  "range": [
+   40,
+   76
+  ],
+  "n": 10,
+  "kb": 235
+ },
+ {
+  "name": "HARMONICA",
+  "label": "Harmonica",
+  "kind": "keys",
+  "family": "wind",
+  "src": "VCSL Hohner Super 64 (CC0)",
+  "range": [
+   48,
+   84
+  ],
+  "n": 7,
+  "kb": 149
+ },
+ {
+  "name": "FLUTE",
+  "label": "Alto recorder",
+  "kind": "keys",
+  "family": "wind",
+  "src": "VCSL Baroque Alto Recorder (CC0)",
+  "range": [
+   53,
+   74
+  ],
+  "n": 6,
+  "kb": 128
+ },
+ {
+  "name": "HARP",
+  "label": "Concert harp",
+  "kind": "keys",
+  "family": "plucked",
+  "src": "VCSL Concert Harp (CC0)",
+  "range": [
+   38,
+   86
+  ],
+  "n": 8,
+  "kb": 221
+ },
+ {
+  "name": "GUITAR",
+  "label": "Nylon strumstick",
+  "kind": "keys",
+  "family": "plucked",
+  "src": "VCSL Strumstick (CC0)",
+  "range": [
+   38,
+   69
+  ],
+  "n": 10,
+  "kb": 231
+ },
+ {
+  "name": "MARIMBA",
+  "label": "Marimba",
+  "kind": "keys",
+  "family": "plucked",
+  "src": "VCSL Marimba (CC0)",
+  "range": [
+   43,
+   84
+  ],
+  "n": 6,
+  "kb": 102
+ },
+ {
+  "name": "PSALTERY",
+  "label": "Plucked psaltery",
+  "kind": "keys",
+  "family": "plucked",
+  "src": "VCSL Bowed Psaltery, plucked (CC0)",
+  "range": [
+   58,
+   78
+  ],
+  "n": 6,
+  "kb": 128
+ },
+ {
+  "name": "DANTRANH",
+  "label": "Dan tranh zither",
+  "kind": "keys",
+  "family": "plucked",
+  "src": "VCSL Dan Tranh (CC0)",
+  "range": [
+   37,
+   71
+  ],
+  "n": 7,
+  "kb": 164
+ },
+ {
+  "name": "BASS",
+  "label": "Fretless bass",
+  "kind": "keys",
+  "family": "bass",
+  "src": "Estuary samples, fretless bass (CC0)",
+  "range": [
+   36,
+   48
+  ],
+  "n": 2,
+  "kb": 43
+ },
+ {
+  "name": "UPRIGHT",
+  "label": "Upright bass (pizz)",
+  "kind": "keys",
+  "family": "bass",
+  "src": "synth from VCSL harp + body filter (CC0)",
+  "range": [
+   38,
+   59
+  ],
+  "n": 4,
+  "kb": 69
+ },
+ {
+  "name": "CELLO",
+  "label": "Bowed cello",
+  "kind": "keys",
+  "family": "strings",
+  "src": "Estuary samples, cello (CC0)",
+  "range": [
+   36,
+   72
+  ],
+  "n": 4,
+  "kb": 119
+ },
+ {
+  "name": "UKULELE",
+  "label": "Ukulele",
+  "kind": "keys",
+  "family": "plucked",
+  "src": "Estuary samples, ukulele (CC0)",
+  "range": [
+   48,
+   60
+  ],
+  "n": 2,
+  "kb": 38
+ },
+ {
+  "name": "808",
+  "label": "808 sub bass",
+  "kind": "keys",
+  "family": "bass",
+  "src": "synth (PatchMind)",
+  "range": [
+   24,
+   48
+  ],
+  "n": 5,
+  "kb": 117
+ },
+ {
+  "name": "BRASS",
+  "label": "Brass stab",
+  "kind": "keys",
+  "family": "synth",
+  "src": "synth (PatchMind)",
+  "range": [
+   40,
+   88
+  ],
+  "n": 9,
+  "kb": 135
+ },
+ {
+  "name": "PLUCK",
+  "label": "Synth pluck",
+  "kind": "keys",
+  "family": "synth",
+  "src": "synth (PatchMind)",
+  "range": [
+   40,
+   94
+  ],
+  "n": 10,
+  "kb": 99
+ },
+ {
+  "name": "VOX",
+  "label": "Vocal oohs and aahs",
+  "kind": "keys",
+  "family": "vocal",
+  "src": "synth formant voice (PatchMind)",
+  "range": [
+   45,
+   81
+  ],
+  "n": 13,
+  "kb": 224
+ },
+ {
+  "name": "CHOIR",
+  "label": "Choir pad",
+  "kind": "keys",
+  "family": "vocal",
+  "src": "synth formant voices (PatchMind)",
+  "range": [
+   45,
+   81
+  ],
+  "n": 7,
+  "kb": 178
+ },
+ {
+  "name": "ACOUSTIC",
+  "label": "Acoustic kit",
+  "kind": "kit",
+  "family": "drums",
+  "src": "VCSL drums (CC0) + synth kick",
+  "n": 13,
+  "kb": 155
+ },
+ {
+  "name": "JAZZ",
+  "label": "Jazz kit (ride and soft snare)",
+  "kind": "kit",
+  "family": "drums",
+  "src": "VCSL drums (CC0) + synth kick",
+  "n": 12,
+  "kb": 166
+ },
+ {
+  "name": "BOOMBAP",
+  "label": "Boom bap kit (dusty, 12-bit)",
+  "kind": "kit",
+  "family": "drums",
+  "src": "VCSL drums (CC0) processed + synth kick",
+  "n": 13,
+  "kb": 120
+ },
+ {
+  "name": "LATIN",
+  "label": "Latin percussion",
+  "kind": "kit",
+  "family": "drums",
+  "src": "VCSL percussion (CC0) + Estuary (CC0)",
+  "n": 14,
+  "kb": 121
+ },
+ {
+  "name": "HAND",
+  "label": "Hand drums (cajon, darbuka, frame)",
+  "kind": "kit",
+  "family": "drums",
+  "src": "VCSL percussion (CC0)",
+  "n": 12,
+  "kb": 104
+ },
+ {
+  "name": "HOUSE",
+  "label": "Club kit (house, garage, techno)",
+  "kind": "kit",
+  "family": "drums",
+  "src": "synth kick + VCSL claps and hats (CC0)",
+  "n": 11,
+  "kb": 100
+ },
+ {
+  "name": "HARD",
+  "label": "Hard kit (hardstyle, gabber, big room)",
+  "kind": "kit",
+  "family": "drums",
+  "src": "synth kick + VCSL (CC0)",
+  "n": 10,
+  "kb": 105
+ },
+ {
+  "name": "TRAP",
+  "label": "Trap kit (808 kick, snap, crisp hats)",
+  "kind": "kit",
+  "family": "drums",
+  "src": "synth 808 + VCSL (CC0)",
+  "n": 11,
+  "kb": 123
+ },
+ {
+  "name": "BREAK_FUNK",
+  "label": "Funk break (95 BPM)",
+  "kind": "chop",
+  "family": "breaks",
+  "src": "played on VCSL drums (CC0) by tools/make_samples.py",
+  "bpm": 95,
+  "slices": [
+   0.0,
+   0.1705,
+   0.3158,
+   0.4863,
+   0.6316,
+   0.8021,
+   0.9474,
+   1.1179,
+   1.2632,
+   1.4337,
+   1.5789,
+   1.7495,
+   1.8947,
+   2.0653,
+   2.2105,
+   2.3811
+  ],
+  "n": 16,
+  "kb": 41
+ },
+ {
+  "name": "BREAK_BOOMBAP",
+  "label": "Boom bap break (88 BPM, dusty)",
+  "kind": "chop",
+  "family": "breaks",
+  "src": "played on VCSL drums (CC0) by tools/make_samples.py",
+  "bpm": 88,
+  "slices": [
+   0.0,
+   0.1977,
+   0.3409,
+   0.5386,
+   0.6818,
+   0.8795,
+   1.0227,
+   1.2205,
+   1.3636,
+   1.5614,
+   1.7045,
+   1.9023,
+   2.0455,
+   2.2432,
+   2.3864,
+   2.5841
+  ],
+  "n": 16,
+  "kb": 44
+ },
+ {
+  "name": "BREAK_JUNGLE",
+  "label": "Jungle break (170 BPM)",
+  "kind": "chop",
+  "family": "breaks",
+  "src": "played on VCSL drums (CC0) by tools/make_samples.py",
+  "bpm": 170,
+  "slices": [
+   0.0,
+   0.0882,
+   0.1765,
+   0.2647,
+   0.3529,
+   0.4412,
+   0.5294,
+   0.6176,
+   0.7059,
+   0.7941,
+   0.8824,
+   0.9706,
+   1.0588,
+   1.1471,
+   1.2353,
+   1.3235
+  ],
+  "n": 16,
+  "kb": 24
+ },
+ {
+  "name": "BREAK_SHUFFLE",
+  "label": "Shuffle break (2-step, 132 BPM)",
+  "kind": "chop",
+  "family": "breaks",
+  "src": "played on VCSL drums (CC0) by tools/make_samples.py",
+  "bpm": 132,
+  "slices": [
+   0.0,
+   0.1273,
+   0.2273,
+   0.3545,
+   0.4545,
+   0.5818,
+   0.6818,
+   0.8091,
+   0.9091,
+   1.0364,
+   1.1364,
+   1.2636,
+   1.3636,
+   1.4909,
+   1.5909,
+   1.7182
+  ],
+  "n": 16,
+  "kb": 30
+ },
+ {
+  "name": "BREAK_LATIN",
+  "label": "Latin groove (105 BPM)",
+  "kind": "chop",
+  "family": "breaks",
+  "src": "played on VCSL drums (CC0) by tools/make_samples.py",
+  "bpm": 105,
+  "slices": [
+   0.0,
+   0.15,
+   0.2857,
+   0.4357,
+   0.5714,
+   0.7214,
+   0.8571,
+   1.0071,
+   1.1429,
+   1.2929,
+   1.4286,
+   1.5786,
+   1.7143,
+   1.8643,
+   2.0,
+   2.15
+  ],
+  "n": 16,
+  "kb": 37
+ },
+ {
+  "name": "BREAK_HALF",
+  "label": "Half-time break (140 BPM)",
+  "kind": "chop",
+  "family": "breaks",
+  "src": "played on VCSL drums (CC0) by tools/make_samples.py",
+  "bpm": 140,
+  "slices": [
+   0.0,
+   0.1071,
+   0.2143,
+   0.3214,
+   0.4286,
+   0.5357,
+   0.6429,
+   0.75,
+   0.8571,
+   0.9643,
+   1.0714,
+   1.1786,
+   1.2857,
+   1.3929,
+   1.5,
+   1.6071
+  ],
+  "n": 16,
+  "kb": 29
+ },
+ {
+  "name": "VINYL",
+  "label": "Vinyl crackle loop",
+  "kind": "chop",
+  "family": "texture",
+  "src": "synth (PatchMind)",
+  "bpm": null,
+  "slices": [
+   0
+  ],
+  "n": 1,
+  "kb": 63
+ },
+ {
+  "name": "RAIN",
+  "label": "Rain on a window",
+  "kind": "chop",
+  "family": "texture",
+  "src": "synth (PatchMind)",
+  "bpm": null,
+  "slices": [
+   0
+  ],
+  "n": 1,
+  "kb": 63
+ },
+ {
+  "name": "FX",
+  "label": "Risers, impacts, sweeps",
+  "kind": "shots",
+  "family": "fx",
+  "src": "synth (PatchMind) + VCSL cymbal (CC0)",
+  "n": 8,
+  "names": [
+   "riser",
+   "riser short",
+   "downlifter",
+   "impact",
+   "reverse cymbal",
+   "cymbal swell",
+   "sub drop",
+   "white wash"
+  ],
+  "kb": 299
+ },
+ {
+  "name": "VOXCHOP",
+  "label": "Vocal chops (one note, five vowels)",
+  "kind": "shots",
+  "family": "vocal",
+  "src": "synth formant voice (PatchMind)",
+  "n": 16,
+  "names": [
+   "a 0",
+   "o 0",
+   "e 0",
+   "u 0",
+   "a 3",
+   "o 3",
+   "e 3",
+   "u 3",
+   "a 7",
+   "o 7",
+   "e 7",
+   "u 7",
+   "a 10",
+   "o 10",
+   "e 10",
+   "u 10"
+  ],
+  "kb": 116
+ }
+]

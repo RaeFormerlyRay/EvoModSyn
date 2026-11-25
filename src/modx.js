@@ -241,7 +241,7 @@ const ModX = (() => {
     m.p('spread', { label: 'Spread', def: 0.5, fmt: pct, small: true });
     m.p('xbias', { label: 'X bias', def: 0.5, fmt: pct, small: true });
     m.p('steps', { label: 'Steps', steps: ['SMOOTH', 'STEPPED', 'QUANT'], def: 1, small: true });
-    m.p('scale', { label: 'Scale', steps: DSP.SCALE_NAMES, def: 4 / 8, small: true, apply: () => m.buildQ() });
+    m.p('scale', { label: 'Scale', steps: DSP.SCALE_NAMES, def: 4 / (DSP.SCALE_NAMES.length - 1), small: true, apply: () => m.buildQ() });
     m.p('root', { label: 'Root', steps: DSP.NOTE_NAMES, def: 9 / 11, small: true, apply: () => m.buildQ() });
     m.p('oct', { label: 'Octave', steps: [1, 2, 3, 4, 5, 6], def: 0.4, small: true });
     m.p('range', { label: 'Range', min: 0.25, max: 4, def: 0.4, fmt: v => v.toFixed(1) + 'oct', small: true });
