@@ -101,6 +101,7 @@ const AI = (() => {
   const BANNED = (m, key, to) => !!BELLISH[m?.kind]?.[key]?.includes(String(to).toUpperCase());
   A.BELLISH = BELLISH;
   async function run(a, h = 0) {
+    if (typeof Tutor !== 'undefined' && Tutor.on && !a.tutored && !A.abort) return Tutor.step(a, h, () => run({ ...a, tutored: true }, h)); // Tutor Mode explains each step
     const HU = UI.hand(h);
     if (A.abort) return;
     try {
@@ -300,8 +301,8 @@ const AI = (() => {
   async function modDepthTo(HU, mod, key, d, ms) {
     const el = UI.knobs[mod + '.' + key], p = E.mods[mod].params[key];
     if (el) { const c = UI.elCenter(el.querySelector('.dial')); await HU.handTo(c.x, c.y, `${E.mods[mod].name} · ${p.label} mod depth`); el.classList.add('ai'); }
-    const d0 = p.modDepth, dur = (ms ?? 500 + Math.abs(d - d0) * 900) * UI.speed, t0 = performance.now();
-    await new Promise(res => { const st = () => { const k = Math.min(1, (performance.now() - t0) / Math.max(1, dur)); E.setModDepth(mod, key, d0 + (d - d0) * k); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
+    const d0 = p.modDepth, prog = UI.clock(ms ?? 500 + Math.abs(d - d0) * 900);
+    await new Promise(res => { const st = () => { const k = prog(); E.setModDepth(mod, key, d0 + (d - d0) * k); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
     E.setModDepth(mod, key, d);
     if (el) setTimeout(() => el.classList.remove('ai'), 1200);
   }

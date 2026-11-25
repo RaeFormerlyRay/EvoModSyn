@@ -398,3 +398,31 @@ canvas.scr.flash{box-shadow:0 0 0 1px #fff8,0 0 14px #fff6}
 .pstep.now{outline:1px solid #fff;outline-offset:-1px}
 .pstep.ai{box-shadow:0 0 0 2px var(--ai)}
 .perfsel{font:10px var(--f-mono);background:#14161b;color:#e9e6dc;border:1px solid #333;width:66px}
+
+/* Tutor Mode: explanation bubble beside the AI hand, styled like a translucent 3D-platformer dialogue box:
+   pale see-through panel, square corners, dark pixel lettering, black pointer arrow toward the hand */
+#tutorbubble{position:fixed;left:0;top:0;z-index:60;width:min(360px,calc(100vw - 16px));padding:14px 18px 12px;border-radius:0;
+  background:rgba(222,232,250,.87);color:#141414;border:0;box-shadow:none;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+  font-family:"Pixelify Sans",var(--f-mono);font-size:16px;line-height:1.5;letter-spacing:.01em;
+  opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;pointer-events:auto;-webkit-font-smoothing:none}
+#tutorbubble.on{opacity:1;visibility:visible}
+#tutorbubble .tb-head{display:flex;justify-content:space-between;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#4a5466}
+#tutorbubble .tb-title{font-weight:500;font-size:18px;margin:2px 0 6px;color:#000}
+#tutorbubble p{margin:0 0 8px}
+#tutorbubble b{font-weight:500;color:#000}
+#tutorbubble .tb-why{color:#2f3a4c}
+#tutorbubble .tb-why b{color:#b0201a}
+#tutorbubble .tb-foot{display:flex;align-items:center;gap:10px;margin-top:2px}
+#tutorbubble .tb-bar{flex:1;height:3px;background:rgba(20,20,20,.15);overflow:hidden}
+#tutorbubble .tb-bar i{display:block;height:100%;width:0;background:#141414}
+#tutorbubble.held .tb-bar i{background:#b0201a}
+#tutorbubble.skipping .tb-bar i{background:#7a8496}
+#tutorbubble .tb-skip{border:0;background:none;color:#141414;padding:2px 0;font:inherit;font-size:14px;cursor:pointer;white-space:nowrap;animation:tb-blink 1s steps(2) infinite}
+#tutorbubble .tb-skip:hover,#tutorbubble .tb-skip:focus-visible{color:#b0201a;animation:none}
+@keyframes tb-blink{50%{opacity:.45}}
+/* the pointer: a black triangle on the edge nearest the hand */
+#tutorbubble .tb-tail{position:absolute;left:22px;top:-10px;width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-bottom:10px solid #000}
+#tutorbubble[data-side="l"] .tb-tail{left:auto;right:22px}
+#tutorbubble[data-vert="b"] .tb-tail{top:auto;bottom:-10px;border-bottom:0;border-top:10px solid #000}
+body.tutor #tutorskip{border-color:#2b6b73;color:var(--ai)}
+@media (prefers-reduced-motion: reduce){#tutorbubble{transition:none}#tutorbubble .tb-skip{animation:none}}
