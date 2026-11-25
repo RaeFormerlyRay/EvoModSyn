@@ -18,13 +18,14 @@ const Mods = (() => {
   // ======================= CLOCK =======================
   function Clock(id) {
     const m = new M(id, { name: 'Pulse', sub: 'master clock', width: 190, stripe: '#e9e6dc', family: 'clock' });
-    m.p('bpm', { label: 'Tempo', min: 60, max: 200, def: (126 - 60) / 140, apply: v => E.setBpm(v), fmt: v => v.toFixed(1) });
+    m.p('bpm', { label: 'Tempo', min: 60, max: 200, def: (126 - 60) / 140, nomod: true, apply: v => E.setBpm(v), fmt: v => v.toFixed(1) });
     m.p('swing', { label: 'Swing', min: 0, max: 0.6, def: 0, apply: v => { E.swing = v; }, fmt: pct });
     m.outEvent('CLK', '16th notes'); m.outEvent('BEAT', 'quarter notes'); m.outEvent('BAR', 'downbeats');
     m.emitTick = (t, step, dur) => {
       m.emit('CLK', { kind: 'tick', time: t, step, dur });
       if (step % 4 === 0) m.emit('BEAT', { kind: 'tick', time: t, step: step / 4, dur: dur * 4 });
       if (step % 16 === 0) m.emit('BAR', { kind: 'tick', time: t, step: step / 16, dur: dur * 16 });
+      if (step % 16 === 0) E.fire('bar', { time: t, bar: step / 16, step, dur: dur * 16 });
       if (step % 4 === 0) E.at(t, () => m.ui?.blink(step % 16 === 0));
     };
     m.layout = [{ custom: 'clock' }, { k: ['bpm', 'swing'], c: true }];
@@ -49,6 +50,7 @@ const Mods = (() => {
     m.p('trans', { label: 'Transp', steps: Array.from({ length: 15 }, (_, i) => i - 7), def: 0.5, small: true });
     m.p('gate', { label: 'Gate', min: 0.1, max: 1, def: 0.55, fmt: pct, small: true });
     m.p('prob', { label: 'Prob', min: 0, max: 1, def: 1, fmt: pct, small: true });
+    m.p('follow', { label: 'Harmony', steps: ['FREE', 'SONG'], def: 0, small: true });
     m.p('ratch', { label: 'Ratchet', min: 0, max: 1, def: 0, fmt: pct, small: true });
     m.inEvent('CLK', function (e) { this.advance(e); }, 'clock in');
     m.inEvent('RST', function () { this.pos = -1; this.dirSign = 1; this.inPat = 0; this.loops = 0; this.songIx = 0; if (this.songOn) this.cur = this.song[0].pat; }, 'reset');
@@ -73,6 +75,8 @@ const Mods = (() => {
     };
     m.advance = function (e) {
       const divN = [1, 2, 4, 0.5][this.v('div')];
+      // following the song: restart the pattern on the bar line so switches land on downbeats
+      if (this.v('follow') && e.step != null && e.step % (16 * Math.max(1, divN)) === 0) { this.cnt = 0; if (this.inPat > 0) { this.inPat = 0; this.pos = -1; this.onLoop(e.time); } }
       if (divN >= 1) { if ((this.cnt++ % divN) !== 0) return; }
       const len = this.v('len') + 1, dir = this.params.dir.choice;
       if (this.inPat >= len) { this.inPat = 0; this.onLoop(e.time); }
@@ -87,7 +91,7 @@ const Mods = (() => {
       E.at(t, () => this.ui?.cursor(pos));
       const play = st.g && Math.random() < this.v('prob') * (st.p ?? 1);
       if (!play) { this.prevSlide = false; return; }
-      const midi = 12 * (this.params.oct.choice + 1) + this.v('root') + DSP.degreeToSemi(this.params.scale.choice, st.n + this.params.trans.choice);
+      const midi = 12 * (this.params.oct.choice + 1) + this.v('root') + DSP.degreeToSemi(this.params.scale.choice, st.n + this.params.trans.choice + (this.v('follow') ? E.chordAt(e.step ?? E.step) : 0));
       const reps = (st.r > 1 ? st.r : 1) * (Math.random() < this.v('ratch') ? 2 : 1);
       const legatoNext = st.s;
       const gateDur = legatoNext ? dur * 1.08 : dur * this.v('gate');
@@ -100,7 +104,7 @@ const Mods = (() => {
       this.prevSlide = !!legatoNext;
     };
     m.setStep = function (i, s) { Object.assign(this.steps[i], s); this.ui?.renderSteps(); };
-    m.layout = [{ custom: 'steps' }, { k: ['len', 'dir', 'div', 'root', 'scale', 'oct', 'trans', 'gate', 'prob', 'ratch'], cls: 'kgrid' }];
+    m.layout = [{ custom: 'steps' }, { k: ['len', 'dir', 'div', 'root', 'scale', 'oct', 'trans', 'gate', 'prob', 'ratch', 'follow'], cls: 'kgrid' }];
     return m;
   }
 
@@ -262,16 +266,40 @@ const Mods = (() => {
     m.p('drive', { label: 'Drive', def: 0.1, fmt: pct, apply: v => { { const c = DSP.curveTanh(v * 0.6); if (sh._c !== c) { sh._c = c; sh.curve = c; } } pre.gain.value = 1 + v * 3; } });
     m.p('accent', { label: 'Accent', def: 0.6, fmt: pct });
     m.p('trigv', { label: 'Trig→', steps: INST, def: 0 });
-    m.p('level', { label: 'Level', def: 0.75, fmt: pct, apply: v => smooth(out.gain, v * 1.1) });
-    m.pat = INST.map(() => Array(16).fill(0)); m.mute = INST.map(() => false); m.pos = -1; m.lvl = INST.map(() => 1);
+    // individual outputs: patching one takes that drum out of the mix output, like the jacks on the real machines
+    const indiv = INST.map(() => gain(0.8));
+    m.p('level', { label: 'Level', def: 0.75, fmt: pct, apply: v => { smooth(out.gain, v * 1.1); indiv.forEach(g => smooth(g.gain, v * 1.1)); } });
+    const destOf = ins => { const i = INST.indexOf(ins); return E.cables.some(c => c.from.mod === m.id && c.from.port === ins) ? indiv[i] : bus; };
+    // 8 pattern banks (A–H) with queued switching at the bar line and a song chain, like the step sequencers
+    m.pats = Array.from({ length: 8 }, () => INST.map(() => Array(16).fill(0))); m.cur = 0; m.next = null; m.view = null;
+    Object.defineProperty(m, 'pat', { get() { return this.pats[this.view ?? this.cur]; }, set(v) { this.pats[this.view ?? this.cur] = v; } });
+    m.song = [{ pat: 0, rep: 4 }]; m.songOn = false; m.songIx = 0; m.loops = 0;
+    m.mute = INST.map(() => false); m.pos = -1; m.lvl = INST.map(() => 1);
+    m.hasNotes = i => m.pats[i].some(r => r.some(v => v));
+    m.queue = function (i) { if (!E.running) { this.cur = i; this.next = null; } else this.next = i; this.ui?.renderGrid(); };
+    m.setSong = function (chain, on) {
+      if (chain && chain.length) this.song = chain.map(c => ({ pat: clamp(c.pat | 0, 0, 7), rep: clamp(c.rep | 0 || 1, 1, 64) }));
+      if (on != null) { this.songOn = !!on; if (this.songOn) { this.songIx = 0; this.loops = 0; this.cur = this.song[0].pat; this.next = null; } }
+      this.ui?.renderGrid();
+    };
+    m.inEvent('RST', function () { this.pos = -1; this.loops = 0; this.songIx = 0; if (this.songOn) this.cur = this.song[0].pat; }, 'reset');
     m.inEvent('CLK', function (e) {
-      this.pos = e.step != null ? e.step % 16 : (this.pos + 1) % 16;
+      const np = e.step != null ? e.step % 16 : (this.pos + 1) % 16;
+      if (np === 0 && this.pos >= 0) { // bar line: pattern switches happen here
+        this.loops++;
+        if (this.songOn) { if (this.loops >= this.song[this.songIx].rep) { this.songIx = (this.songIx + 1) % this.song.length; this.loops = 0; this.cur = this.song[this.songIx].pat; } }
+        else if (this.next != null) { this.cur = this.next; this.next = null; this.loops = 0; }
+        E.at(e.time, () => this.ui?.renderGrid());
+      }
+      this.pos = np;
       const p = this.pos, t = e.time;
       E.at(t, () => this.ui?.cursor(p));
       INST.forEach((ins, i) => { const v = this.pat[i][p]; if (v && !this.mute[i]) this.hit(ins, t, v === 2 ? 1 : 0.7); });
     }, 'clock in');
-    m.inEvent('TRIG', function (e) { this.hit(this.params.trigv.choice, e.time, e.vel ?? 0.8); }, 'trigger one voice');
-    m.outAudio('OUT', out, 'drum mix');
+    m.inEvent('TRIG', function (e) { this.hit(e.inst && INST.includes(e.inst) ? e.inst : this.params.trigv.choice, e.time, e.vel ?? 0.8); }, 'trigger one voice (or the instrument a rhythm generator names)');
+    m.outAudio('OUT', out, 'drum mix (minus any drum patched on its own)');
+    const NAMES = { BD: 'bass drum', SD: 'snare', CP: 'clap', CH: 'closed hat', OH: 'open hat', LT: 'low tom', HT: 'high tom', RS: 'rimshot', CB: 'cowbell', CY: 'cymbal' };
+    INST.forEach((ins, i) => m.outAudio(ins, indiv[i], NAMES[ins] + ' only'));
     let openHat = null;
     const env = (g, t, peak, dec, att = 0.001) => { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + att); g.gain.exponentialRampToValueAtTime(0.0001, t + att + dec); };
     const osc = (type, f, t, stop) => { const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); o.start(t); o.stop(stop); return o; };
@@ -281,13 +309,13 @@ const Mods = (() => {
       const a = vel >= 1 ? 1 + this.v('accent') * 0.8 : 1;
       const lv = this.lvl[INST.indexOf(ins)] * vel * a;
       const is8 = kit === '808', dirt = kit === 'DIRT', lofi = kit === 'LOFI';
-      const g = gain(0); g.connect(bus);
+      const dest = destOf(ins), g = gain(0); g.connect(dest);
       if (ins === 'BD') {
         const dec = (is8 ? 0.55 : dirt ? 0.35 : 0.32) * dk, o = osc(dirt ? 'square' : 'sine', (is8 ? 110 : 160) * tu, t, t + dec + 0.1);
         o.frequency.exponentialRampToValueAtTime((is8 ? 46 : 52) * tu, t + (is8 ? 0.09 : 0.05));
         if (dirt) { const lp = filt('lowpass', 900, 3); o.connect(lp); lp.connect(g); } else o.connect(g);
         env(g, t, lv * (dirt ? 0.7 : 1.15), dec);
-        if (!is8) { const n = noise(t, t + 0.02), hp = filt('highpass', 2500), cg = gain(0); n.connect(hp); hp.connect(cg); cg.connect(bus); env(cg, t, lv * 0.35, 0.012); }
+        if (!is8) { const n = noise(t, t + 0.02), hp = filt('highpass', 2500), cg = gain(0); n.connect(hp); hp.connect(cg); cg.connect(dest); env(cg, t, lv * 0.35, 0.012); }
       } else if (ins === 'SD') {
         const dec = (is8 ? 0.16 : 0.2) * dk;
         [is8 ? 238 : 185, is8 ? 476 : 330].forEach((f, k) => { const o = osc('triangle', f * tu, t, t + dec + 0.05); const og = gain(0); o.connect(og); og.connect(g); env(og, t, lv * (k ? 0.25 : 0.5), dec * 0.6); });
@@ -542,7 +570,7 @@ const Mods = (() => {
   function Bodies(id) {
     const m = new M(id, { name: 'Bodies', sub: 'physical modeling resonator', width: 270, stripe: '#e8b04a', family: 'voice' });
     const bus = gain(1), out = gain(0.6); bus.connect(out);
-    m.p('model', { label: 'Body', steps: DSP.PM_MODELS, def: 0.2 });
+    m.p('model', { label: 'Body', steps: DSP.PM_MODELS, def: 0.4 }); // defaults to MARIMBA, not BELL
     m.p('bright', { label: 'Bright', def: 0.6, fmt: pct });
     m.p('decay', { label: 'Decay', def: 0.4, fmt: pct });
     m.p('pos', { label: 'Strike Pos', def: 0.3, fmt: pct });
@@ -575,12 +603,13 @@ const Mods = (() => {
     fx.connect(conv); conv.connect(vret); vret.connect(master);
     m.ch = [];
     for (let i = 1; i <= 8; i++) {
-      const inp = gain(1), lv = gain(0.7), sd = gain(0);
-      inp.connect(lv); lv.connect(master); lv.connect(sd); sd.connect(fx);
+      const inp = gain(1), lv = gain(0.7), sd = gain(0), an = ctx.createAnalyser();
+      an.fftSize = 2048; an.smoothingTimeConstant = 0; // per-channel meter for the auto-mix
+      inp.connect(lv); lv.connect(master); lv.connect(sd); sd.connect(fx); lv.connect(an);
       m.p('l' + i, { label: 'Ch' + i, def: 0.7, fmt: pct, small: true, apply: v => smooth(lv.gain, v * v * 1.4) });
       m.p('s' + i, { label: 'Fx' + i, def: 0.1, fmt: pct, small: true, apply: v => smooth(sd.gain, v * 0.9) });
       m.inAudio('IN' + i, inp, 'channel ' + i);
-      m.ch.push({ inp, lv, sd });
+      m.ch.push({ inp, lv, sd, an });
     }
     const DT = ['1/16', '1/8', '3/16', '1/4', '3/8', '1/2'], DTB = [0.25, 0.5, 0.75, 1, 1.5, 2];
     const setDT = () => smooth(dl.delayTime, Math.min(1.9, 60 / E.bpm * DTB[m.v('dtime')]), 0.08);
@@ -601,7 +630,7 @@ const Mods = (() => {
     const inp = gain(1), lim = ctx.createDynamicsCompressor(), vol = gain(0.8), an = ctx.createAnalyser();
     lim.threshold.value = -6; lim.knee.value = 4; lim.ratio.value = 14; lim.attack.value = 0.002; lim.release.value = 0.12;
     an.fftSize = 2048; an.smoothingTimeConstant = 0.6;
-    inp.connect(lim); lim.connect(vol); vol.connect(an); an.connect(ctx.destination);
+    inp.connect(lim); lim.connect(vol); vol.connect(an); an.connect(E.layers[E.L].bus); // each layer's monitor feeds that layer's master bus
     m.p('vol', { label: 'Volume', def: 0.8, fmt: pct, apply: v => smooth(vol.gain, v) });
     m.inAudio('IN', inp, 'to speakers');
     for (let i = 2; i <= 4; i++) { const g = gain(1); g.connect(inp); m.inAudio('IN' + i, g, 'extra mixer in'); }

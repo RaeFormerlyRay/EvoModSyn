@@ -22,6 +22,7 @@
   <button class="btn" id="cabview" title="Change cable visibility">Cables 100%</button>
   <button class="btn" id="resetpatch" title="Load the starter patch">Starter patch</button>
   <button class="btn" id="clearpatch" title="Remove every cable">Clear cables</button>
+  <button class="btn" id="resetknobs" title="Wipe the rack: stop the AI, remove added modules, clear every pattern, cable and Layer B, and turn every knob down">Reset all</button>
 </header>
 
 <main class="app">
@@ -43,11 +44,30 @@
       </select>
     </div>
     <div class="row">
+      <select id="form" class="grow" aria-label="Song form">
+        <option value="auto">Song: automatic (verse / chorus by default)</option>
+        <option value="off">No song form: loop and evolve patterns</option>
+      </select>
+    </div>
+    <div class="row">
+      <select id="layermode" aria-label="Which layers the AI may use" title="Which layers the AI may use"><option value="ab">AI uses Layers A + B</option><option value="a">AI uses Layer A only</option></select>
+      <label class="check"><input type="checkbox" id="automix" checked> Auto-mix</label>
+      <button class="btn" type="button" id="mixnow">Mix now</button>
+      <button class="btn" type="button" id="likeai" title="Tell the AI its last move was good; it will make moves like it more often">Good move</button>
+      <button class="btn" type="button" id="undoai" title="Put back the AI's last move; it learns you did not like it">Undo AI move</button>
+    </div>
+    <div class="row">
       <button class="btn primary grow" id="run">Perform</button>
       <button class="btn stop" id="stop" disabled>Stop AI</button>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" id="follow" checked> Follow the AI around the rack</label>
+      <label class="check"><input type="checkbox" id="twohands" checked> Two hands</label>
+      <select id="follow" aria-label="What the rack view follows">
+        <option value="h0" selected>View follows hand 1</option>
+        <option value="h1">View follows hand 2</option>
+        <option value="split">Split screen: follow both</option>
+        <option value="off">View stays put</option>
+      </select>
       <label class="check"><input type="checkbox" id="fast"> Quick moves</label>
     </div>
 
@@ -67,7 +87,7 @@
     </div>
 
     <div>
-      <h2>Set timeline</h2>
+      <h2>Song map</h2>
       <div class="timeline" id="timeline"><div class="sec">No performance running</div></div>
       <div class="tl-meta"><span id="tlnow">0:00</span><span id="tlsec">—</span><span id="tlend">0:00</span></div>
     </div>
@@ -89,8 +109,18 @@
   </aside>
 
   <div class="stage">
+  <div class="layerbar" id="layerbar">
+    <div class="ltabs" role="tablist" aria-label="Rack layers"><button class="ltab on" type="button" data-l="0" role="tab" aria-selected="true">Layer A</button><button class="ltab" type="button" data-l="1" role="tab" aria-selected="false">Layer B</button></div>
+    <label class="xfade" title="Crossfade the two layers' masters">A <input type="range" id="xfade" min="0" max="1000" value="0" aria-label="Crossfade between layer A and layer B"> B</label>
+    <span class="lmeters" aria-hidden="true"><i id="lma"></i><i id="lmb"></i></span>
+    <button class="btn" type="button" id="splitab" aria-pressed="false" title="Show Layer A and Layer B side by side">Split A | B</button>
+    <button class="btn" type="button" id="dupab" title="Duplicate the whole Layer A rack into Layer B">Copy A → B</button>
+    <span class="lnote" id="lnote">Layer B is empty</span>
+  </div>
+  <div class="rackrow" id="rackrow">
   <section class="rackwrap" id="rackwrap">
     <div id="rack">
+      <div class="rlane" id="lane0" data-name="Layer A"></div><div class="rlane" id="lane1" data-name="Layer B" hidden></div>
       <svg id="cables"></svg>
       <div id="aihand"><span id="aihandlbl"></span></div>
     </div>
@@ -100,6 +130,8 @@
       <button class="btn primary" id="power2">Power on</button>
     </div>
   </section>
+  <section class="handcam" id="handcam" aria-label="Split screen: hand 2"><canvas id="camcv"></canvas><div class="camlbl" id="camlbl">② Hand 2</div></section>
+  </div>
   <section class="tl" id="tl" aria-label="Timeline"></section>
   </div>
 </main>
@@ -109,12 +141,22 @@
 <script src="src/engine.js"></script>
 <script src="src/modules.js"></script>
 <script src="src/modx.js"></script>
+<script src="src/fx.js"></script>
+<script src="src/lfo.js"></script>
 <script src="src/panels.js"></script>
 <script src="src/ui.js"></script>
 <script src="src/modxui.js"></script>
+<script src="src/fxui.js"></script>
+<script src="src/handcam.js"></script>
+<script src="src/reel.js"></script>
+<script src="src/prime.js"></script>
+<script src="src/theory.js"></script>
 <script src="src/ai.js"></script>
+<script src="src/song.js"></script>
 <script src="src/critic.js"></script>
 <script src="src/timeline.js"></script>
+<script src="src/mix.js"></script>
+<script src="src/layers.js"></script>
 <script src="src/main.js"></script>
 <!--BODY-END-->
 </body>

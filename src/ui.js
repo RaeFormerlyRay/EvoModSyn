@@ -6,7 +6,14 @@ const UI = (() => {
   const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const rack = $('#rack'), wrap = $('#rackwrap'), svg = $('#cables'), hand = $('#aihand'), handLbl = $('#aihandlbl'), readout = $('#readout');
   const SVGNS = 'http://www.w3.org/2000/svg';
-  const U = { modEls: {}, knobs: {}, jacks: {}, jpos: {}, temp: null, speed: 1 };
+  const lanes = [$('#lane0'), $('#lane1')];
+  const U = { temp: null, speed: 1, split: false, pinView: false };
+  // a layer is on screen when it is the viewed one, or always in split view
+  const vis = L => U.split || L === E.V;
+  U.isVisible = vis;
+  // modules, knobs and jacks are kept per layer; these maps follow the layer in context (Engine.L)
+  const LU = [0, 1].map(() => ({ modEls: {}, knobs: {}, jacks: {}, jpos: {} }));
+  ['modEls', 'knobs', 'jacks', 'jpos'].forEach(k => Object.defineProperty(U, k, { get: () => LU[E.L][k] }));
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   U.sleep = sleep;
@@ -22,8 +29,8 @@ const UI = (() => {
   function makeKnob(mod, key) {
     const p = mod.params[key];
     const el = h('div', 'knob' + (p.small ? ' sm' : ''));
-    el.innerHTML = `<div class="dial" tabindex="0" role="slider" aria-label="${mod.name} ${p.label}"><svg class="ring" viewBox="0 0 100 100"><path class="bg" d="${arc(-135, 135)}"/><path class="fg"/></svg><div class="ptr"></div></div><div class="lab">${p.label}</div><div class="val"></div>`;
-    el.style.setProperty('--kc', mod.stripe);
+    el.innerHTML = `<div class="dial" tabindex="0" role="slider" aria-label="${mod.name} ${p.label}"><svg class="ring" viewBox="0 0 100 100"><path class="bg" d="${arc(-135, 135)}"/><path class="fg"/><path class="mr"/><circle class="md" r="6" cx="50" cy="-99"/></svg><div class="ptr"></div></div><div class="lab">${p.label}</div><div class="val"></div>`;
+    el.style.setProperty('--kc', mod.stripe); el.dataset.mod = mod.id; el.dataset.key = key;
     const dial = $('.dial', el), ptr = $('.ptr', el), fg = $('.fg', el), val = $('.val', el);
     const draw = () => {
       const a = -135 + p.n * 270; ptr.style.transform = `rotate(${a}deg)`;
@@ -32,16 +39,44 @@ const UI = (() => {
     };
     p.listeners.push(draw); draw();
     let sy = 0, sn = 0, drag = false;
-    dial.addEventListener('pointerdown', e => { drag = true; sy = e.clientY; sn = p.n; dial.setPointerCapture(e.pointerId); showReadout(e, p); e.preventDefault(); });
-    dial.addEventListener('pointermove', e => { if (!drag) return; const k = e.shiftKey ? 0.15 : 1; p.setNorm(sn + (sy - e.clientY) / 170 * k * (p.steps ? Math.max(1, 8 / p.steps.length) : 1)); showReadout(e, p); });
-    const up = () => { drag = false; readout.style.display = 'none'; };
+    const linkOf = () => E.within(+el.closest('.mod').dataset.layer, () => E.findCable(mod.id, '@' + key));
+    let depthDrag = false, sd = 0;
+    dial.addEventListener('contextmenu', e => { const c = linkOf(); if (!c) return; e.preventDefault(); E.within(+el.closest('.mod').dataset.layer, () => E.disconnect(c)); });
+    dial.addEventListener('pointerdown', e => { if ((e.altKey || e.ctrlKey || e.metaKey) && linkOf()) { depthDrag = true; sy = e.clientY; sd = p.modDepth; dial.setPointerCapture(e.pointerId); e.preventDefault(); showDepth(e, p); return; } drag = true; sy = e.clientY; sn = p.n; dial.setPointerCapture(e.pointerId); showReadout(e, p); e.preventDefault(); });
+    dial.addEventListener('pointermove', e => { if (depthDrag) { E.within(+el.closest('.mod').dataset.layer, () => E.setModDepth(mod.id, key, sd + (sy - e.clientY) / 170)); showDepth(e, p); return; } if (!drag) return; const k = e.shiftKey ? 0.15 : 1; p.setNorm(sn + (sy - e.clientY) / 170 * k * (p.steps ? Math.max(1, 8 / p.steps.length) : 1)); showReadout(e, p); });
+    const up = () => { drag = false; depthDrag = false; readout.style.display = 'none'; };
     dial.addEventListener('pointerup', up); dial.addEventListener('pointercancel', up);
     dial.addEventListener('dblclick', () => p.setNorm(p.defN));
-    dial.addEventListener('wheel', e => { e.preventDefault(); const st = p.steps ? 1 / (p.steps.length - 1) : 0.02; p.setNorm(p.n + (e.deltaY < 0 ? st : -st)); }, { passive: false });
+    dial.addEventListener('wheel', e => { e.preventDefault(); if ((e.altKey || e.ctrlKey || e.metaKey) && linkOf()) { E.within(+el.closest('.mod').dataset.layer, () => E.setModDepth(mod.id, key, p.modDepth + (e.deltaY < 0 ? 0.03 : -0.03))); showDepth(e, p); return; } const st = p.steps ? 1 / (p.steps.length - 1) : 0.02; p.setNorm(p.n + (e.deltaY < 0 ? st : -st)); }, { passive: false });
     dial.addEventListener('keydown', e => { const st = p.steps ? 1 / (p.steps.length - 1) : 0.02; if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { p.setNorm(p.n + st); e.preventDefault(); } if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { p.setNorm(p.n - st); e.preventDefault(); } });
     U.knobs[mod.id + '.' + key] = el;
     return el;
   }
+  function showDepth(e, p) { readout.style.display = 'block'; readout.textContent = `${p.mod.name} ${p.label}: modulation depth ${p.modDepth >= 0 ? '+' : ''}${Math.round(p.modDepth * 100)}%`; readout.style.left = (e.clientX + 14) + 'px'; readout.style.top = (e.clientY - 26) + 'px'; }
+  // the coloured band around a modulated knob: how far the cable can push it, and where it is right now
+  const ringed = new Set();
+  // set an attribute only when it changes: unchanged SVG needs no repaint
+  const setA = (el, k, v) => { const c = el.__a || (el.__a = {}); v = String(v); if (c[k] !== v) { c[k] = v; el.setAttribute(k, v); } };
+  function drawModRings() {
+    const seen = new Set();
+    for (const L of [0, 1]) {
+      if (!vis(L)) continue;
+      for (const c of E.layers[L].cables) {
+        if (c.to.port[0] !== '@') continue;
+        const key = c.to.port.slice(1), el = LU[L].knobs[c.to.mod + '.' + key], p = E.layers[L].mods[c.to.mod]?.params[key]; if (!el || !p) continue;
+        seen.add(el); ringed.add(el);
+        const mr = el.querySelector('.mr'), md = el.querySelector('.md');
+        const a0 = -135 + p.n * 270, a1 = -135 + Math.max(0, Math.min(1, p.n + p.modDepth)) * 270;
+        setA(mr, 'd', Math.abs(a1 - a0) > 0.5 ? arc(Math.min(a0, a1), Math.max(a0, a1), 47) : ''); setA(mr, 'stroke', c.color);
+        const an = (-135 + p.nm * 270) * Math.PI / 180; setA(md, 'cx', (50 + 44 * Math.sin(an)).toFixed(1)); setA(md, 'cy', (50 - 44 * Math.cos(an)).toFixed(1)); setA(md, 'fill', c.color);
+        if (!el.classList.contains('modded')) el.classList.add('modded');
+      }
+    }
+    for (const el of ringed) if (!seen.has(el)) { setA(el.querySelector('.mr'), 'd', ''); setA(el.querySelector('.md'), 'cy', -99); el.classList.remove('modded'); ringed.delete(el); }
+  }
+  // short message at the bottom of the rack
+  const toast = h('div', 'toast'); document.body.append(toast); let toastT = 0;
+  U.flashMsg = txt => { toast.textContent = txt; toast.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => toast.classList.remove('on'), 4200); };
   function showReadout(e, p) { readout.style.display = 'block'; readout.textContent = `${p.mod.name} ${p.label}: ${p.display()}`; readout.style.left = (e.clientX + 14) + 'px'; readout.style.top = (e.clientY - 26) + 'px'; }
 
   // ---------- jacks ----------
@@ -187,16 +222,24 @@ const UI = (() => {
       ['mode', 'freq', 'q'].forEach(k => m.params[k].listeners.push(upd)); upd();
     },
     drumgrid(m, el) {
+      const top = h('div', 'patrow'), pbs = [];
+      for (let i = 0; i < 8; i++) { const b = h('button', 'pb', 'ABCDEFGH'[i]); b.type = 'button'; b.title = `Drum pattern ${'ABCDEFGH'[i]} (switches at the next bar while playing) · Shift-click: copy the current pattern here`; b.onclick = ev => { if (ev.shiftKey) { m.pats[i] = m.pat.map(r => r.slice()); render(); } else m.queue(i); }; top.append(b); pbs.push(b); }
+      const songBtn = h('button', 'pb song', 'SONG'); songBtn.type = 'button'; songBtn.title = 'Song mode: play the drum chain'; songBtn.onclick = () => m.setSong(null, !m.songOn); top.append(songBtn);
       const g = h('div', 'dgrid'); const cells = [], labels = [];
       m.INST.forEach((ins, r) => {
         const l = h('div', 'rl', ins); l.title = 'Click to mute ' + ins; l.onclick = () => { m.mute[r] = !m.mute[r]; render(); }; g.append(l); labels.push(l);
         cells[r] = [];
         for (let s = 0; s < 16; s++) { const c = h('div', 'dc'); c.onclick = () => { m.pat[r][s] = (m.pat[r][s] + 1) % 3; render(); }; g.append(c); cells[r][s] = c; }
       });
-      const render = () => m.INST.forEach((_, r) => { labels[r].classList.toggle('mute', m.mute[r]); for (let s = 0; s < 16; s++) { const v = m.pat[r][s]; cells[r][s].classList.toggle('on', v > 0); cells[r][s].classList.toggle('acc', v === 2); } });
-      el.append(g); render();
+      const render = () => {
+        m.INST.forEach((_, r) => { labels[r].classList.toggle('mute', m.mute[r]); for (let s = 0; s < 16; s++) { const v = m.pat[r][s]; cells[r][s].classList.toggle('on', v > 0); cells[r][s].classList.toggle('acc', v === 2); } });
+        pbs.forEach((b, i) => { b.classList.toggle('cur', i === (m.view ?? m.cur)); b.classList.toggle('has', m.hasNotes(i)); b.classList.toggle('q', i === m.next); });
+        songBtn.classList.toggle('cur', m.songOn);
+      };
+      el.style.setProperty('--stripe', m.stripe);
+      el.append(top, g); render();
       let cur = -1;
-      m.ui = { renderGrid: render, cells, labels, cursor: p => { if (cur >= 0) cells.forEach(row => row[cur].classList.remove('cur')); cells.forEach(row => row[p].classList.add('cur')); cur = p; } };
+      m.ui = { renderGrid: render, cells, labels, pbs, songBtn, cursor: p => { if (cur >= 0) cells.forEach(row => row[cur].classList.remove('cur')); cells.forEach(row => row[p].classList.add('cur')); cur = p; } };
     },
     modelinfo(m, el) {
       const row = h('div', 'row'), lcd = h('div', 'lcd grow'), led = h('span', 'led'); row.append(lcd, led); el.append(row);
@@ -268,16 +311,16 @@ const UI = (() => {
   U.animated = [];
   U.customs = customs; U.fitCanvas = fitCanvas; U.h = h; // other files register panel displays here
   let buildingId = null;
-  U.anim = f => { f._mod = buildingId; U.animated.push(f); };
+  U.anim = f => { f._mod = buildingId; f._layer = E.L; U.animated.push(f); };
   const FIXED = new Set(['clock', 'mixer', 'monitor']);
 
   // ---------- build rack ----------
   function renderModule(m, isNew) {
     const id = m.id; buildingId = id;
-    const el = h('div', 'mod' + (isNew ? ' mod-new' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id;
+    const el = h('div', 'mod' + (isNew ? ' mod-new' : '')); el.style.width = m.width + 'px'; el.style.setProperty('--stripe', m.stripe); el.dataset.mod = id; el.dataset.layer = E.L;
     const pk = Panels.key(m); if (pk) { el.style.setProperty('--panel-img', `url("${Panels.url(pk)}")`); el.classList.add('worn'); if (Panels.light(pk)) el.classList.add('light'); }
     el.innerHTML = `<div class="mod-h"><span class="nm">${m.name}</span><span class="sub">${m.sub}</span></div>`;
-    if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; x.onclick = () => U.removeModule(id); el.querySelector('.mod-h').append(x); }
+    if (!FIXED.has(id)) { const x = h('button', 'modx', '×'); x.type = 'button'; x.title = `Remove ${m.name} from the rack`; const LL = E.L; x.onclick = () => E.within(LL, () => U.removeModule(id)); el.querySelector('.mod-h').append(x); }
     const body = h('div', 'mod-b'); el.append(body);
     for (const sec of m.layout) {
       if (sec.custom) { const box = h('div', 'cust'); box.style.display = 'flex'; box.style.flexDirection = 'column'; box.style.gap = '5px'; body.append(box); customs[sec.custom](m, box); }
@@ -289,8 +332,8 @@ const UI = (() => {
     if (gi.children.length) jr.append(gi); jr.append(go); el.append(jr);
     const mg = el.querySelector('.mixgrid');
     if (mg) { mg.style.display = 'grid'; mg.style.gridTemplateColumns = 'repeat(8,1fr)'; mg.style.justifyItems = 'center'; }
-    rack.insertBefore(el, svg);
-    U.modEls[id] = el;
+    lanes[E.L].append(el);
+    U.modEls[id] = el; U.watchModule(el);
     buildingId = null;
     if (isNew) setTimeout(() => el.classList.remove('mod-new'), 2200);
     return el;
@@ -300,7 +343,7 @@ const UI = (() => {
     new ResizeObserver(() => U.layout()).observe(rack);
     window.addEventListener('resize', () => U.layout());
     U.layout();
-    E.on('change', ev => { if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); U.status(); });
+    E.on('change', ev => { if (!vis(E.L)) return; if (ev.type === 'connect' && ev.ai) ev.cable.ai = performance.now(); U.syncCables(); if (ev.cable && ev.cable.to.port[0] === '@') U.layout(); U.status(); });
     requestAnimationFrame(frame);
   };
   // Add a new module of a registered type to the end of the rack; returns its id
@@ -312,25 +355,47 @@ const UI = (() => {
     E.fire('modules', { type: 'add', id });
     return id;
   };
-  U.removeModule = function (id) {
-    if (FIXED.has(id) || !E.mods[id]) return false;
+  U.renderModule = renderModule;
+  U.removeModule = function (id, force) {
+    if ((FIXED.has(id) && !force) || !E.mods[id]) return false;
     E.remove(id);
-    U.modEls[id]?.remove(); delete U.modEls[id];
+    if (U.modEls[id]) { U.unwatchModule(U.modEls[id]); U.modEls[id].remove(); } delete U.modEls[id];
     for (const k of Object.keys(U.jacks)) if (k.startsWith(id + '.')) { delete U.jacks[k]; delete U.jpos[k]; }
     for (const k of Object.keys(U.knobs)) if (k.startsWith(id + '.')) delete U.knobs[k];
-    U.animated = U.animated.filter(f => f._mod !== id);
-    U.syncCables(); U.layout(); U.status();
+    U.animated = U.animated.filter(f => f._mod !== id || f._layer !== E.L);
+    if (vis(E.L)) { U.syncCables(); U.layout(); U.status(); }
     return true;
   };
+  // show one layer's rack: the other layer keeps running (and sounding, if its master is up) off screen
+  // keepWork: change only what is on screen, and leave the AI working on its own layer (E.L)
+  U.showLayer = function (L, keepWork) {
+    E.V = L; if (!keepWork) E.L = L;
+    paintLanes();
+    if (!vis(E.L)) U.handOff();
+    U.syncCables(); U.layout(); U.status();
+    document.body.dataset.layer = 'AB'[L];
+    E.fire('view', L);
+  };
 
+  function paintLanes() {
+    lanes.forEach((ln, L) => { ln.hidden = !vis(L); ln.classList.toggle('focus', L === E.V); });
+    rack.classList.toggle('splitab', U.split);
+  }
+  U.setSplit = function (on) { U.split = !!on; paintLanes(); U.syncCables(); U.layout(); U.status(); E.fire('view', E.V); };
   U.layout = function () {
     const rr = rack.getBoundingClientRect();
-    for (const k in U.jacks) { const r = U.jacks[k].querySelector('.hole').getBoundingClientRect(); U.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
+    for (const L of [0, 1]) {
+      if (!vis(L)) continue;
+      const J = LU[L];
+      for (const k in J.jacks) { const r = J.jacks[k].querySelector('.hole').getBoundingClientRect(); J.jpos[k] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
+      // knobs that take a modulation cable are cable ends too
+      for (const c of E.layers[L].cables) if (c.to.port[0] === '@') { const el = J.knobs[c.to.mod + '.' + c.to.port.slice(1)]; if (!el) continue; const r = el.querySelector('.dial').getBoundingClientRect(); J.jpos[`${c.to.mod}.in.${c.to.port}`] = { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; }
+    }
     svg.setAttribute('width', rack.scrollWidth); svg.setAttribute('height', rack.scrollHeight);
     svg.style.width = rack.scrollWidth + 'px'; svg.style.height = rack.scrollHeight + 'px';
   };
-  U.jackXY = (mod, dir, port) => U.jpos[`${mod}.${dir}.${port}`];
-  U.status = () => { $('#cpu').textContent = `${E.order.length} modules · ${E.cables.length} cables`; };
+  U.jackXY = (mod, dir, port) => U.jpos[`${mod}.${dir}.${port}`] || (port && port[0] === '@' ? knobCenter(mod, port.slice(1)) : undefined);
+  U.status = () => { const Ly = E.layers[E.V]; $('#cpu').textContent = `${E.layerName(E.V)} · ${Ly.order.length} modules · ${Ly.cables.length} cables`; };
 
   // ---------- cables ----------
   const cabEls = new Map();
@@ -340,9 +405,10 @@ const UI = (() => {
     svg.append(g); return g;
   }
   U.syncCables = function () {
-    const ids = new Set(E.cables.map(c => c.id));
-    for (const [id, g] of cabEls) if (!ids.has(id)) { g.remove(); cabEls.delete(id); }
-    for (const c of E.cables) if (!cabEls.has(c.id)) cabEls.set(c.id, mkCableEl(c.color));
+    const want = new Map();
+    for (const L of [0, 1]) if (vis(L)) for (const c of E.layers[L].cables) want.set(c.id, c);
+    for (const [id, g] of cabEls) if (!want.has(id)) { g.remove(); cabEls.delete(id); }
+    for (const c of want.values()) if (!cabEls.has(c.id)) { const g = mkCableEl(c.color); if (c.to.port[0] === '@') g.classList.add('modlink'); cabEls.set(c.id, g); }
   };
   function cablePath(a, b, born) {
     const dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy);
@@ -352,23 +418,29 @@ const UI = (() => {
   }
   function drawCable(g, a, b, born, ai) {
     const d = cablePath(a, b, born);
-    const ps = g.querySelectorAll('path'); ps.forEach(p => p.setAttribute('d', d));
-    const cs = g.querySelectorAll('circle'); cs[0].setAttribute('cx', a.x); cs[0].setAttribute('cy', a.y); cs[1].setAttribute('cx', b.x); cs[1].setAttribute('cy', b.y);
-    g.classList.toggle('ai', !!ai);
+    if (g.__d !== d) { // only touch the SVG when the cable actually moved
+      g.__d = d; const ps = g.__ps || (g.__ps = g.querySelectorAll('path')); ps.forEach(p => p.setAttribute('d', d));
+      const cs = g.__cs || (g.__cs = g.querySelectorAll('circle')); cs[0].setAttribute('cx', a.x); cs[0].setAttribute('cy', a.y); cs[1].setAttribute('cx', b.x); cs[1].setAttribute('cy', b.y);
+    }
+    if (g.__ai !== !!ai) { g.__ai = !!ai; g.classList.toggle('ai', !!ai); }
   }
-  let tempEl = null;
+  const tempEls = [null, null, null];
   function drawAllCables() {
     const t = performance.now();
-    for (const c of E.cables) {
-      const g = cabEls.get(c.id); if (!g) continue;
-      const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port); if (!a || !b) continue;
-      const glowing = (c.ai && t - c.ai < 1800) || c.glowUntil > t;
-      drawCable(g, a, b, c.born, glowing);
+    for (const L of [0, 1]) {
+      if (!vis(L)) continue;
+      const J = LU[L].jpos;
+      for (const c of E.layers[L].cables) {
+        const g = cabEls.get(c.id); if (!g) continue;
+        const a = J[`${c.from.mod}.out.${c.from.port}`], b = J[`${c.to.mod}.in.${c.to.port}`]; if (!a || !b) continue;
+        const glowing = (c.ai && t - c.ai < 1800) || c.glowUntil > t;
+        drawCable(g, a, b, c.born, glowing);
+      }
     }
-    if (U.temp) {
-      if (!tempEl) tempEl = mkCableEl(U.temp.color);
-      drawCable(tempEl, U.temp.a, U.temp.b, null, U.temp.ai);
-    } else if (tempEl) { tempEl.remove(); tempEl = null; }
+    [U.temp, U.hands?.[0].temp, U.hands?.[1].temp].forEach((tp, k) => {
+      if (tp) { if (!tempEls[k]) tempEls[k] = mkCableEl(tp.color); drawCable(tempEls[k], tp.a, tp.b, null, tp.ai); }
+      else if (tempEls[k]) { tempEls[k].remove(); tempEls[k] = null; }
+    });
   }
 
   // ---------- user patching ----------
@@ -376,10 +448,13 @@ const UI = (() => {
   function startDrag(e) {
     e.preventDefault();
     const el = e.currentTarget, mod = el.dataset.mod, port = el.dataset.port, dir = el.dataset.dir;
+    const L = +el.closest('.mod').dataset.layer; // patch inside the layer this jack belongs to
     let anchor = { mod, port, dir };
-    if (dir === 'in') { const c = E.findCable(mod, port); if (c) { E.disconnect(c); anchor = { mod: c.from.mod, port: c.from.port, dir: 'out' }; } }
-    const a = U.jackXY(anchor.mod, anchor.dir, anchor.port);
-    drag = { anchor };
+    const a = E.within(L, () => {
+      if (dir === 'in') { const c = E.findCable(mod, port); if (c) { E.disconnect(c); anchor = { mod: c.from.mod, port: c.from.port, dir: 'out' }; } }
+      return LU[L].jpos[`${anchor.mod}.${anchor.dir}.${anchor.port}`];
+    });
+    drag = { anchor, L };
     U.temp = { a, b: { ...a }, color: '#e9e6dc' };
     window.addEventListener('pointermove', onDrag); window.addEventListener('pointerup', endDrag, { once: true });
   }
@@ -393,22 +468,35 @@ const UI = (() => {
   }
   function endDrag(e) {
     window.removeEventListener('pointermove', onDrag);
-    const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('.jack');
+    const under = document.elementFromPoint(e.clientX, e.clientY), t = under?.closest('.jack'), kn = !t && under?.closest('.knob');
     hoverEl?.classList.remove('hover'); hoverEl = null;
-    if (t && drag && t.dataset.dir !== drag.anchor.dir) {
+    // a cable dropped on a knob modulates that knob
+    if (kn && drag && drag.anchor.dir === 'out' && +kn.closest('.mod').dataset.layer === drag.L) {
+      const ok = E.within(drag.L, () => E.connect({ mod: drag.anchor.mod, port: drag.anchor.port }, { mod: kn.dataset.mod, port: '@' + kn.dataset.key }));
+      if (!ok) U.flashMsg?.('That knob cannot be modulated (stepped switches and the tempo cannot), or the jack is a clock/gate jack.');
+      else { const km = E.layers[drag.L].mods[kn.dataset.mod]; U.flashMsg?.(`Modulating ${km.name} ${km.params[kn.dataset.key].label}. Alt + drag the knob sets the depth, right-click removes the cable.`); }
+    }
+    if (t && drag && t.dataset.dir !== drag.anchor.dir && +t.closest('.mod').dataset.layer === drag.L) {
       const A = drag.anchor, B = { mod: t.dataset.mod, port: t.dataset.port, dir: t.dataset.dir };
       const from = A.dir === 'out' ? A : B, to = A.dir === 'out' ? B : A;
-      const ok = E.connect({ mod: from.mod, port: from.port }, { mod: to.mod, port: to.port });
+      const ok = E.within(drag.L, () => E.connect({ mod: from.mod, port: from.port }, { mod: to.mod, port: to.port }));
       if (!ok) U.flashMsg?.('Those two jacks do not fit: clock/gate jacks (green) only connect to green jacks.');
     }
     drag = null; U.temp = null;
   }
 
-  // ---------- AI hand ----------
-  const handPos = { x: 40, y: 40 };
-  U.follow = true;
-  function ensureVisible(x, y) {
-    if (!U.follow) return 0;
+  // ---------- AI hands ----------
+  // Two independent cursors. Hand 1 (cyan) and hand 2 (amber) each move, carry cables and turn knobs on their own.
+  const hand2 = h('div', '', '<span></span>'); hand2.id = 'aihand2'; hand.after(hand2);
+  const hands = [{ el: hand, lbl: handLbl, pos: { x: 40, y: 40 }, temp: null, focus: null }, { el: hand2, lbl: hand2.querySelector('span'), pos: { x: 120, y: 60 }, temp: null, focus: null }];
+  U.hands = hands;
+  U.twoHands = true;
+  U.followMode = 'h0'; // 'off' | 'h0' | 'h1' | 'split'
+  Object.defineProperty(U, 'follow', { get: () => U.followMode !== 'off', set: v => { U.followMode = v ? (U.followMode === 'off' ? 'h0' : U.followMode) : 'off'; } });
+  const hix = hi => (U.twoHands && hi === 1 ? 1 : 0);
+  function ensureVisible(x, y, hi) {
+    const mode = U.followMode;
+    if (mode === 'off' || !(mode === 'h' + hi || (mode === 'split' && hi === 0) || (!U.twoHands && hi === 0))) return 0;
     const vw = wrap.clientWidth, vh = wrap.clientHeight, sx = wrap.scrollLeft, sy = wrap.scrollTop, m = 80;
     let nx = sx, ny = sy;
     if (x < sx + m) nx = x - m * 2; else if (x > sx + vw - m) nx = x - vw + m * 2;
@@ -416,97 +504,119 @@ const UI = (() => {
     if (nx !== sx || ny !== sy) { wrap.scrollTo({ left: Math.max(0, nx), top: Math.max(0, ny), behavior: 'smooth' }); return 380; }
     return 0;
   }
-  U.handTo = async function (x, y, label, ms) {
-    hand.classList.add('on'); if (label != null) handLbl.textContent = label;
-    const w = ensureVisible(x, y); if (w) await sleep(w * U.speed);
-    const sx = handPos.x, sy = handPos.y, dist = Math.hypot(x - sx, y - sy);
+  const focusCls = ['ai-focus', 'ai-focus2'];
+  function focus(id, hi) { hands[hi].focus = id; Object.entries(U.modEls).forEach(([k, e]) => e.classList.toggle(focusCls[hi], k === id)); }
+  async function handTo(hi, x, y, label, ms) {
+    const H = hands[hi];
+    // the layer the AI is working on is off screen: move without showing the cursor
+    if (!vis(E.L)) { H.pos.x = x; H.pos.y = y; H.el.classList.remove('on'); return; }
+    H.el.classList.add('on'); if (label != null) H.lbl.textContent = (U.twoHands ? (hi ? '② ' : '① ') : '') + label;
+    const w = ensureVisible(x, y, hi); if (w) await sleep(w * U.speed);
+    const sx = H.pos.x, sy = H.pos.y, dist = Math.hypot(x - sx, y - sy);
     const dur = (ms ?? Math.min(900, 220 + dist * 0.6)) * U.speed;
     const t0 = performance.now();
     await new Promise(res => {
       const step = () => {
         const k = Math.min(1, (performance.now() - t0) / dur), e = ease(k);
-        handPos.x = sx + (x - sx) * e; handPos.y = sy + (y - sy) * e - Math.sin(k * Math.PI) * Math.min(60, dist * 0.12);
-        hand.style.transform = `translate(${handPos.x}px,${handPos.y}px)`;
-        if (U.temp && U.temp.followHand) U.temp.b = { x: handPos.x, y: handPos.y };
+        H.pos.x = sx + (x - sx) * e; H.pos.y = sy + (y - sy) * e - Math.sin(k * Math.PI) * Math.min(60, dist * 0.12);
+        H.el.style.transform = `translate(${H.pos.x}px,${H.pos.y}px)`;
+        if (H.temp && H.temp.followHand) H.temp.b = { x: H.pos.x, y: H.pos.y };
         k < 1 ? requestAnimationFrame(step) : res();
       };
       step();
     });
-  };
-  U.handOff = () => { hand.classList.remove('on'); Object.values(U.modEls).forEach(e => e.classList.remove('ai-focus')); };
-  U.focus = id => { Object.entries(U.modEls).forEach(([k, e]) => e.classList.toggle('ai-focus', k === id)); };
+  }
   const knobCenter = (id, key) => { const el = U.knobs[id + '.' + key]; if (!el) return null; const rr = rack.getBoundingClientRect(), r = el.querySelector('.dial').getBoundingClientRect(); return { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; };
   const elCenter = el => { const rr = rack.getBoundingClientRect(), r = el.getBoundingClientRect(); return { x: r.left - rr.left + r.width / 2, y: r.top - rr.top + r.height / 2 }; };
   U.elCenter = elCenter;
 
-  // Turn a knob to normalised value n, visibly.
-  U.aiKnob = async function (id, key, n, ms, label) {
-    const m = E.mods[id], p = m?.params[key]; if (!p) return false;
-    const c = knobCenter(id, key); const el = U.knobs[id + '.' + key];
-    U.focus(id);
-    await U.handTo(c.x, c.y, label || `${m.name} · ${p.label}`);
-    el.classList.add('ai');
-    const n0 = p.n, dur = (ms ?? 500 + Math.abs(n - n0) * 900) * U.speed, t0 = performance.now();
-    await new Promise(res => { const st = () => { const k = Math.min(1, (performance.now() - t0) / dur); p.setNorm(n0 + (n - n0) * ease(k)); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
-    p.setNorm(n);
-    setTimeout(() => el.classList.remove('ai'), 1400);
-    return true;
-  };
-
-  U.aiPatch = async function (from, to, label) {
-    const a = U.jackXY(from.mod, 'out', from.port), b = U.jackXY(to.mod, 'in', to.port);
-    if (!a || !b || !E.canConnect(from, to)) return false;
-    const ja = U.jacks[`${from.mod}.out.${from.port}`], jb = U.jacks[`${to.mod}.in.${to.port}`];
-    const existing = E.findCable(to.mod, to.port);
-    if (existing && existing.from.mod === from.mod && existing.from.port === from.port) return true;
-    if (existing) await U.aiUnpatch(existing);
-    U.focus(from.mod);
-    await U.handTo(a.x, a.y, label || `patch ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}`);
-    ja.classList.add('ai'); await sleep(140 * U.speed);
-    U.temp = { a, b: { ...a }, color: '#52f2ff', ai: true, followHand: true };
-    U.focus(to.mod);
-    await U.handTo(b.x, b.y, null, Math.min(1300, 450 + Math.hypot(b.x - a.x, b.y - a.y) * 0.7));
-    jb.classList.add('ai');
-    U.temp = null;
-    E.connect(from, to, { ai: true });
-    setTimeout(() => { ja.classList.remove('ai'); jb.classList.remove('ai'); }, 1200);
-    await sleep(180 * U.speed);
-    return true;
-  };
-
-  U.aiUnpatch = async function (c, label) {
-    const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port);
-    U.focus(c.to.mod);
-    c.glowUntil = performance.now() + 5000;
-    await U.handTo(b.x, b.y, label || `unplug ${E.mods[c.to.mod].name} ${c.to.port}`);
-    E.disconnect(c, { ai: true });
-    U.temp = { a, b: { ...b }, color: c.color, ai: true, followHand: true };
-    const mid = { x: (a.x + b.x) / 2, y: Math.max(a.y, b.y) + 40 };
-    await U.handTo(mid.x, mid.y, null, 380);
-    U.temp = null;
-    return true;
-  };
-
-  U.aiCells = async function (els, mod, label, fn) {
-    if (!els.length) return;
-    U.focus(mod);
-    const first = elCenter(els[0]);
-    await U.handTo(first.x, first.y, label);
-    for (let i = 0; i < els.length; i++) {
-      const c = elCenter(els[i]);
-      await U.handTo(c.x, c.y, null, 70);
-      fn(i); els[i].classList.add('ai');
-      const el = els[i]; setTimeout(() => el.classList.remove('ai'), 900);
-    }
-  };
-  U.aiPoint = async function (el, mod, label) { U.focus(mod); const c = elCenter(el); await U.handTo(c.x, c.y, label); el.classList.add('ai'); setTimeout(() => el.classList.remove('ai'), 900); };
+  // The same set of moves for each hand: UI.hand(0) or UI.hand(1)
+  function makeHand(hi) {
+    const H = {};
+    H.handTo = (x, y, label, ms) => handTo(hi, x, y, label, ms);
+    H.focus = id => focus(id, hi);
+    // Turn a knob to normalised value n, visibly.
+    H.aiKnob = async function (id, key, n, ms, label) {
+      const m = E.mods[id], p = m?.params[key]; if (!p) return false;
+      const c = knobCenter(id, key); const el = U.knobs[id + '.' + key]; if (!c) { p.setNorm(n); return true; }
+      H.focus(id);
+      await H.handTo(c.x, c.y, label || `${m.name} · ${p.label}`);
+      el.classList.add(hi ? 'ai2' : 'ai');
+      const n0 = p.n, dur = (ms ?? 500 + Math.abs(n - n0) * 900) * U.speed, t0 = performance.now();
+      await new Promise(res => { const st = () => { const k = Math.min(1, (performance.now() - t0) / dur); p.setNorm(n0 + (n - n0) * ease(k)); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
+      p.setNorm(n);
+      setTimeout(() => el.classList.remove(hi ? 'ai2' : 'ai'), 1400);
+      return true;
+    };
+    H.aiPatch = async function (from, to, label) {
+      const a = U.jackXY(from.mod, 'out', from.port), b = U.jackXY(to.mod, 'in', to.port);
+      if (!a || !b || !E.canConnect(from, to)) return false;
+      const ja = U.jacks[`${from.mod}.out.${from.port}`], jb = U.jacks[`${to.mod}.in.${to.port}`] || (to.port[0] === '@' && U.knobs[to.mod + '.' + to.port.slice(1)]);
+      const existing = E.findCable(to.mod, to.port);
+      if (existing && existing.from.mod === from.mod && existing.from.port === from.port) return true;
+      if (existing) await H.aiUnpatch(existing);
+      H.focus(from.mod);
+      await H.handTo(a.x, a.y, label || `patch ${E.mods[from.mod].name} ${from.port} → ${E.mods[to.mod].name} ${to.port}`);
+      ja.classList.add('ai'); await sleep(140 * U.speed);
+      hands[hi].temp = { a, b: { ...a }, color: hi ? '#ffb03b' : '#52f2ff', ai: true, followHand: true };
+      H.focus(to.mod);
+      await H.handTo(b.x, b.y, null, Math.min(1300, 450 + Math.hypot(b.x - a.x, b.y - a.y) * 0.7));
+      jb.classList.add('ai');
+      hands[hi].temp = null;
+      E.connect(from, to, { ai: true });
+      setTimeout(() => { ja.classList.remove('ai'); jb.classList.remove('ai'); }, 1200);
+      await sleep(180 * U.speed);
+      return true;
+    };
+    H.aiUnpatch = async function (c, label) {
+      const a = U.jackXY(c.from.mod, 'out', c.from.port), b = U.jackXY(c.to.mod, 'in', c.to.port);
+      H.focus(c.to.mod);
+      c.glowUntil = performance.now() + 5000;
+      await H.handTo(b.x, b.y, label || `unplug ${E.mods[c.to.mod].name} ${c.to.port}`);
+      E.disconnect(c, { ai: true });
+      hands[hi].temp = { a, b: { ...b }, color: c.color, ai: true, followHand: true };
+      const mid = { x: (a.x + b.x) / 2, y: Math.max(a.y, b.y) + 40 };
+      await H.handTo(mid.x, mid.y, null, 380);
+      hands[hi].temp = null;
+      return true;
+    };
+    H.aiCells = async function (els, mod, label, fn, cellMs = 70) {
+      if (!els.length) return;
+      H.focus(mod);
+      const first = elCenter(els[0]);
+      await H.handTo(first.x, first.y, label);
+      for (let i = 0; i < els.length; i++) {
+        const c = elCenter(els[i]);
+        await H.handTo(c.x, c.y, null, cellMs);
+        fn(i); els[i].classList.add('ai');
+        const el = els[i]; setTimeout(() => el.classList.remove('ai'), 900);
+      }
+    };
+    H.aiPoint = async function (el, mod, label) { H.focus(mod); const c = elCenter(el); await H.handTo(c.x, c.y, label); el.classList.add('ai'); setTimeout(() => el.classList.remove('ai'), 900); };
+    return H;
+  }
+  const HANDS = [makeHand(0), makeHand(1)];
+  U.hand = hi => HANDS[hix(hi)];
+  // the single-hand API stays for older callers (hand 1)
+  ['handTo', 'focus', 'aiKnob', 'aiPatch', 'aiUnpatch', 'aiCells', 'aiPoint'].forEach(k => { U[k] = (...a) => HANDS[0][k](...a); });
+  U.handOff = hi => { (hi == null ? [0, 1] : [hi]).forEach(i => { hands[i].el.classList.remove('on'); Object.values(U.modEls).forEach(e => e.classList.remove(focusCls[i])); }); };
+  U.setTwoHands = on => { U.twoHands = !!on; if (!on) U.handOff(1); U.syncFollow?.(); };
 
   // ---------- frame loop ----------
-  function frame() {
-    E.flushUI();
-    drawAllCables();
-    for (const f of U.animated) f();
+  // Displays (scopes, meters, step lights) are only drawn for modules that are on screen, at about 30 frames a
+  // second while the audio runs and about 8 when it is off. Cables and knobs still follow every frame.
+  const onScreen = new Set();
+  const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => { const k = e.target.dataset.layer + ':' + e.target.dataset.mod; if (e.isIntersecting) onScreen.add(k); else onScreen.delete(k); }), { rootMargin: '120px' }) : null;
+  U.watchModule = el => { if (io) io.observe(el); else onScreen.add(el.dataset.layer + ':' + el.dataset.mod); };
+  U.unwatchModule = el => { if (io) io.unobserve(el); onScreen.delete(el.dataset.layer + ':' + el.dataset.mod); };
+  let fn = 0, lastT = 0;
+  function frame(t) {
     requestAnimationFrame(frame);
+    E.flushUI();
+    drawAllCables(); drawModRings();
+    const every = E.ctx.state === 'running' ? 30 : 120; // ms between display redraws
+    if (t - lastT < every) return; lastT = t; fn++;
+    for (const f of U.animated) if (vis(f._layer) && onScreen.has(f._layer + ':' + f._mod)) { try { f(); } catch (e) { console.error(e); } }
   }
 
   // cable visibility

@@ -62,8 +62,61 @@ Jack colours: silver is audio, orange is CV, green is clock/gate/note events (gr
 * **Patches visibly.** A glowing cursor travels to each jack and knob. Cables are carried across the rack and plugged in, knobs turn smoothly, sequencer steps and drum cells light up as they are written, and the log explains every move.
 * **Listens.** Every 200 ms it measures loudness, spectral brightness, low end, rhythmic motion and an overall energy score from the master output, and compares them with its targets.
 * **Learns.** It chooses among about 25 moves (filter sweeps, drive, drum mutes and fills, sequence mutations, wobble rate changes, modulation patches, layering voices in and out, delay throws and more), scores each one by how much closer it moved the sound to the target, and keeps a running value per move. Those values are saved in the browser and shown in the console, so it gets better at your rack over time.
+* **Reset all.** The header button stops the AI, empties Layer B, removes every added module, clears every pattern and cable, and turns every knob down (bipolar knobs to centre; switches and tempo stay at defaults). Every new AI design or set also starts from a blank rack at default settings.
 * **Grows the rack.** It can add new modules while it works: an extra sequencer plus a voice for each new layer, and another mixer when every channel is taken. Ask for something "complex", "layered" or a "song" to get more layers. It writes patterns A–D (main, variation, stripped-back, fill) for each sequencer and chains them into a song.
 * **Composes fresh lines.** Every melody, bass and acid line is built from a randomly chosen rhythm (euclidean, additive groupings like 3+3+2, call and response, syncopated, dotted, sparse, driving 16ths) and pitch idea (a short motif developed by inversion, transposition or reversal, a wandering line with leaps, arpeggios over a random chord loop, a contour shape, a melody against a pedal note), then checked against recent lines so it doesn't repeat itself. Each design picks one key for every layer. The log names the idea it used.
+* **Writes songs.** Sets and designs follow a song form: verse / chorus by default (intro, verse, build, chorus, verse, build, chorus, bridge, build, final chorus, outro), or pop with a pre-chorus, club build-and-drop, AABA, or an ambient arc, picked from the brief or the "Song" menu. `src/theory.js` holds the music theory it uses: the energy of each section, functional harmony and progressions per section, harmonic rhythm, cadences, melody writing (chord tones on strong beats, a repeated hook, higher register in the chorus), bass and arpeggio writing, and drum arrangement per section. Sequencers set to *Harmony: SONG* follow the chord progression, and the drum machine now has eight pattern banks with song mode.
+* **Plans ahead while it plays.** While one section plays and the performer tweaks it, the AI writes the next section into spare pattern banks (with Claude writing it when the Claude brain is on), and everything switches on the bar line. The song map shows the playing section, the one being planned and the ones ready.
+* **Builds, push-pull and transitions.** Builds raise filters and reverb, double the snare roll halfway through, then pull the kick and bass out for the last bar so the chorus or drop slams back in. Phrase ends get fills, choruses get a crash, the filters breathe in and out halfway through long phrases, and the final chorus can lift the key by one or two semitones.
+* **Avoids sameness and farty synths.** It counts how long each part has looped unchanged (lead 8 bars, arps 12, bass and drums 16) and develops it before it gets annoying. Sound-design guardrails and the critic steer away from buzzy low square waves, closed resonant filters, blatty envelopes and overdriven low notes.
 * **Listens back and critiques itself.** Every 60 seconds (adjustable) it records 6 seconds of the master and measures level, clipping, spectral balance, roughness (sensory dissonance), the key it hears versus the keys the sequencers use, and motion. It asks what works, what doesn't and what clashes, then corrects course and credits or blames the moves it made since the last listen. With the Claude brain, Claude judges it from a spectrogram image plus the measurements and patch state; otherwise a built-in critic does. The clip, the spectrogram and the verdict appear under "Listening back".
 * **Performs.** For a set it builds an energy arc (intro, build, drop, break, build, peak, outro) across the requested length, switches sequencer patterns to match each section, writes new variations, adds layers, and keeps shaping the sound until the end, then fades out.
 * **Claude brain (optional).** When the page is opened as a Claude artifact, "Claude plans" sends the brief, the module catalogue and the current patch to Claude, which returns the patch design and the set's sections as actions. The built-in performer then executes them and keeps listening and adjusting.
+
+## Two layers
+
+The rack holds two complete, independent modular systems, **Layer A** and **Layer B**, each with its own modules, cables, chords and master bus. The tabs above the rack switch which one is on screen (the other keeps running off screen). Opening Layer B the first time, or pressing **Copy A → B**, duplicates the whole Layer A rack into it. The **A ⟷ B** crossfader blends the two masters (equal power), and the meters next to it show each layer's level.
+
+With **Two layers** ticked, the performer finishes the Layer A design, duplicates it into Layer B, and gives Layer B a contrasting sound (other voice models, kit, octave and space). The song engine then puts the choruses (and sometimes the bridge) on Layer B and everything else on Layer A. On a layer change, the new layer's master rises over the last beat before the downbeat and the old one falls just after. During a build, the next layer creeps in underneath, drops out for the pull bar, and pushes back in on the downbeat. The view and the hands follow the layer that is playing. The timeline records layer fades and the edits on each layer (Layer B lanes are marked "(B)").
+
+## Mixing and shrill sounds
+
+**Auto-mix** gives every mixer channel a meter (loudness-weighted, like LUFS) and works out what the channel plays: drums, bass, lead, arp, texture or effects. It then balances the channels around the drums. The bass sits about 1.5 dB under the drums, the lead about 3 dB under them, arps about 8 dB under and textures and noises 11 to 13 dB under. A second part of the same kind sits a further 3 dB back. The bass is kept dry, and background parts get more reverb. The performer runs a mix pass after each design, a couple of bars into each new section, and whenever the balance drifts. **Mix now** runs one on demand. The critic also sends the per-channel balance to Claude.
+
+The same meters watch for high-pitched, repeating sounds. A part that keeps most of its energy above 3 kHz for about 12 seconds gets darkened, dropped an octave, turned down 5 dB or (on the third strike) taken out. Hi-hats that sizzle over everything are pulled back. At design time a static check also stops screaming resonance and parts pitched in the top octave.
+
+## Tape keyboard, low-pass gates and undo (daily run, 24 November 2026)
+
+- **Reel** is a tape-replay keyboard voice in the spirit of the Mellotron and the new 20CC Spectron. It has six synthesized tapes (strings, cello, flute, choir, brass, organ) with wow, flutter, age (hiss and saturation), tone and a chord mode. Notes sustain until the tape runs out (Tape Len), and a retriggered key starts its tape again. Ambient designs often add it, and the AI can swap tapes, change the chord shape and add or remove wobble.
+- **LPG Duo** is two vactrol-style low-pass gates. A TRIG pings the filter and the VCA open together, and they close with a fast-then-slow vactrol tail, so sustained voices turn into plucks and bongos. Modes are LP, COMBO and VCA. The AI can put a sequenced voice through it (it prefers the tapes) and make the plucks shorter or longer.
+- **Undo AI move** puts back the knob turns and patches of the AI's last move, and the AI learns that you didn't like it.
+
+## Effects, LFOs and knob modulation (24 November 2026)
+
+**Effects** (`src/fx.js`, all built from Web Audio nodes, each with IN, OUT and a Mix knob):
+Halls (algorithmic reverb: plate, room, hall, cathedral, spring, bloom, reverse, gated, with octave-up shimmer),
+Echoes (tape, digital, ping-pong, multi-head and cloud delay with wow, ducking, freeze and runaway feedback),
+Ensemble (chorus, string ensemble, dimension, flanger, through-zero flanger, vibrato), Phase 12 (4–12 stage stereo phaser, LFO or envelope sweep),
+Heat (tube, tape, fuzz, wavefolder, sine and parabolic shapers, rectifier, bitcrusher and sample-rate reducer),
+Bode (Hilbert frequency shifter, ring mod and barber-pole spiral feedback), Sympathy (sympathetic strings that follow the song's chords),
+Vowel (A-E-I-O-U formant filter), Pump (glue compressor, 3-band OTT-style squash, tempo sidechain pump),
+Stutter (beat repeat, reverse, tape stop, backspin), Prism (two-voice pitch shifter with cascading feedback),
+Cassette (age, wow, flutter, warp, hiss, dropouts) and Horizon (a chaotic feedback delay network that self-oscillates).
+
+**Modulation** (`src/lfo.js`): Orbit (four morphing LFOs with 11 shapes, sync, cross-mod and fade-in), Performer (two lanes of 16 drawn curve
+steps with presets like WOB8, PUMP, TALK, DUB), Attractor (Lorenz, Rössler, Thomas and logistic chaos), Macros (four macro knobs and a build
+riser with a DROP trigger) and Follower (envelope follower and transient trigger).
+
+**Any knob can be modulated, Massive-style**: drag a cable from any CV output and drop it on a knob. A coloured ring shows the range and the
+live position. Alt + drag (or Alt + wheel) on the knob sets the depth, right-click removes the cable.
+
+The drum machine has an output per drum (BD … CY); patching one takes that drum out of the mix output.
+
+The AI inserts effects and patches LFOs and macros onto synth, filter and effect knobs on most designs, varies the modulation every
+12–30 seconds (dramatic in choruses and drops, subtle in verses), fires the macro riser in builds, rotates its instruments instead of
+defaulting to the bell, and keeps repeating high drums (cowbell first) low in the mix.
+
+## Prime rhythm generator and the Good move button (daily run, 25 November 2026)
+
+- **Prime** is a four-channel rhythm generator. The Bank knob picks EUCLID, NUMERIC, TIMELINE or BREAK rhythms, Prime scrolls through them, and four faders reshape each channel (thin or fill, rotate, drift to a neighbouring rhythm, play the off-beats). Patch T1 to T4 and A1 to A4 anywhere, or patch ALL into the drum machine's TRIG to hear all four channels on their own drums.
+- **Good move** tells the AI you liked its last move, so it does more like it. It is the opposite of Undo AI move.

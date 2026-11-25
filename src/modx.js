@@ -14,10 +14,10 @@ const ModX = (() => {
   const constSrc = (v = 0) => { const c = ctx.createConstantSource(); c.offset.value = v; c.start(); return c; };
   const gain = (v = 1) => { const g = ctx.createGain(); g.gain.value = v; return g; };
   // A silent path to the speakers keeps analysers and script processors running in every browser
-  const sink = gain(0); sink.connect(ctx.destination);
+  const sink = () => E.layers[E.L].sink; // silent path to the speakers through the layer being built
   // Read the current value of a signal (lets CV inputs steer things that are scheduled in JavaScript)
   function reader(node) {
-    const an = ctx.createAnalyser(); an.fftSize = 32; node.connect(an); an.connect(sink);
+    const an = ctx.createAnalyser(); an.fftSize = 32; node.connect(an);
     const buf = new Float32Array(32);
     return () => { an.getFloatTimeDomainData(buf); return buf[31]; };
   }
@@ -107,7 +107,7 @@ const ModX = (() => {
     m.p('rate', { label: 'Rate', min: 0.02, max: 20, curve: 'exp', def: 0.35, fmt: hz, apply: retune });
     m.p('sync', { label: 'Sync', steps: SW_SYNC, def: 0, apply: retune });
     m.p('spread', { label: 'Rate spr', def: 0.3, fmt: pct, apply: retune });
-    m.p('phase', { label: 'Phase spr', def: 1, fmt: pct, apply: rebuild });
+    m.p('phase', { label: 'Phase spr', def: 1, fmt: pct, nomod: true, apply: rebuild });
     m.p('shape', { label: 'Shape', steps: SW_SHAPES, def: 0, apply: rebuild });
     m.p('depth', { label: 'Depth', def: 0.6, fmt: pct, apply: depth });
     m.p('pol', { label: 'Polarity', steps: ['BI', 'UNI'], def: 0, apply: depth });
@@ -166,7 +166,7 @@ const ModX = (() => {
     inp.connect(rec); inp.connect(dry); dry.connect(out);
     wetBus.connect(sat); sat.connect(wet); wet.connect(out); sat.connect(fb); fb.connect(rec);
     const sp = ctx.createScriptProcessor(2048, 1, 1);
-    rec.connect(sp); sp.connect(sink);
+    rec.connect(sp); sp.connect(sink());
     m.frozen = false;
     sp.onaudioprocess = ev => {
       if (m.disposed) { sp.onaudioprocess = null; try { sp.disconnect(); rec.disconnect(); } catch (e) { /* gone */ } return; }

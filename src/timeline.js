@@ -19,7 +19,10 @@ const TL = (() => {
   const snapT = t => T.snap ? Math.round(t / (beatLen() / 4)) * (beatLen() / 4) : t;
   const srcNow = () => (AI.busy && performance.now() - (T.userTouch || 0) > 400) ? 'ai' : 'you';
   const sortEv = () => T.events.sort((a, b) => a.t - b.t);
-  const modName = id => E.mods[id]?.name || id;
+  // events on Layer B carry module keys like "B:seq1"; Layer A keys are plain ids
+  const LP = 'B:', keyOf = (L, id) => L ? LP + id : id, parseKey = k => typeof k === 'string' && k.startsWith(LP) ? [1, k.slice(LP.length)] : [0, k];
+  const mm = k => { const [L, id] = parseKey(k); return E.layers[L].mods[id]; };
+  const modName = k => { const [L, id] = parseKey(k); return (E.layers[L].mods[id]?.name || id) + (L ? ' (B)' : ''); };
 
   // ======================= TAPE: the rack module the audio clips play through =======================
   function Tape(id) {
@@ -38,7 +41,8 @@ const TL = (() => {
     const upd = () => { lcd.textContent = `${T.clips.length} clip${T.clips.length === 1 ? '' : 's'} · ${T.playing ? (T.recording ? 'REC ' : 'PLAY ') : 'STOP '}${fmtT(T.pos)}`; reels.classList.toggle('spin', T.playing); };
     UI.anim(upd);
   };
-  function ensureTape() {
+  function ensureTape() { return E.within(0, ensureTape0); } // the tape lives on Layer A
+  function ensureTape0() {
     if (E.mods.tape) return 'tape';
     const id = UI.createModule('Tape', { id: 'tape' });
     // plug it into a free mixer channel, or straight into the monitor
@@ -53,34 +57,35 @@ const TL = (() => {
   P.setNorm = function (n, silent) { const b = this.n; origSet.call(this, n, silent); if (this.n !== b) E.fire('param', this); };
   const lastPt = {};
   E.on('param', p => {
-    if (!T.recording || T.applying || !p.mod || !E.mods[p.mod.id]) return;
-    const t = T.pos, k = p.mod.id + '.' + p.key, src = srcNow(), last = lastPt[k];
+    if (!T.recording || T.applying || !p.mod || mm(keyOf(p.mod.layer, p.mod.id)) !== p.mod) return;
+    const mk = keyOf(p.mod.layer, p.mod.id), t = T.pos, k = mk + '.' + p.key, src = srcNow(), last = lastPt[k];
     if (last && T.events.includes(last) && t - last.t < 0.04 && last.t <= t) { last.n = p.n; return; }
-    const ev = { id: uid(), t, kind: 'param', mod: p.mod.id, key: p.key, n: p.n, ramp: false, src };
+    const ev = { id: uid(), t, kind: 'param', mod: mk, key: p.key, n: p.n, ramp: false, src };
     T.events.push(ev); lastPt[k] = ev; dirty();
   });
   E.on('change', ev => {
     if (!T.recording || T.applying) return;
     const c = ev.cable;
-    T.events.push({ id: uid(), t: T.pos, kind: 'cable', op: ev.type, mod: c.to.mod, from: { ...c.from }, to: { ...c.to }, src: ev.ai ? 'ai' : srcNow() });
+    T.events.push({ id: uid(), t: T.pos, kind: 'cable', op: ev.type, mod: keyOf(E.L, c.to.mod), from: { ...c.from }, to: { ...c.to }, src: ev.ai ? 'ai' : srcNow() });
     dirty();
   });
   const optsOf = m => ({ name: m.name.replace(/ \d+$/, ''), stripe: m.stripe, model: m.params.model?.choice });
   E.on('modules', ev => {
     if (!T.recording || T.applying) return;
-    if (ev.type === 'add') { const m = E.mods[ev.id]; T.events.push({ id: uid(), t: T.pos, kind: 'module', op: 'add', mod: ev.id, type: m.kind, opts: optsOf(m), src: srcNow() }); }
-    else T.events.push({ id: uid(), t: T.pos, kind: 'module', op: 'remove', mod: ev.id, src: srcNow() });
+    if (ev.type === 'add') { const m = E.mods[ev.id]; T.events.push({ id: uid(), t: T.pos, kind: 'module', op: 'add', mod: keyOf(E.L, ev.id), type: m.kind, opts: optsOf(m), src: srcNow() }); }
+    else T.events.push({ id: uid(), t: T.pos, kind: 'module', op: 'remove', mod: keyOf(E.L, ev.id), src: srcNow() });
     dirty();
   });
+  E.on('layerfade', f => { if (T.recording && !T.applying) { T.events.push({ id: uid(), t: T.pos, kind: 'layerfade', L: f.L, to: f.to, sec: f.sec, src: srcNow() }); dirty(); } });
   E.on('transport', r => { if (T.recording && !T.applying) { T.events.push({ id: uid(), t: T.pos, kind: 'transport', run: r, src: srcNow() }); dirty(); } });
   // patterns, drum grids and song chains: compare snapshots a few times a second
-  const dataOf = m => m.kind === 'StepSeq' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn } : m.kind === 'Drums' ? { pat: m.pat, mute: m.mute } : null;
+  const dataOf = m => m.kind === 'StepSeq' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn } : m.kind === 'Drums' ? { pats: m.pats, cur: m.cur, song: m.song, songOn: m.songOn, mute: m.mute } : null;
   const lastData = {}, lastDataEv = {};
   setInterval(() => {
     if (!T.recording) return;
-    for (const id of E.order) {
-      const d = dataOf(E.mods[id]); if (!d) continue;
-      const s = JSON.stringify(d);
+    for (const Ly of E.layers) for (const mid of Ly.order) {
+      const d = dataOf(Ly.mods[mid]); if (!d) continue;
+      const s = JSON.stringify(d), id = keyOf(Ly.i, mid);
       if (lastData[id] !== s) { const first = lastData[id] == null; lastData[id] = s; if (!first && !T.applying) { const prev = lastDataEv[id]; if (prev && T.events.includes(prev) && T.pos - prev.t < 1.2) prev.data = JSON.parse(s); else { lastDataEv[id] = { id: uid(), t: T.pos, kind: 'data', mod: id, data: JSON.parse(s), src: srcNow() }; T.events.push(lastDataEv[id]); } dirty(); } }
     }
   }, 180);
@@ -93,6 +98,9 @@ const TL = (() => {
   // ======================= SNAPSHOT / RESTORE =======================
   const FIXED = new Set(['clock', 'mixer', 'monitor']);
   function snapshot() {
+    return Object.assign(E.within(0, snapshotA), { layerB: E.hasLayer(1) ? Layers.snapshot(1) : null, buses: E.layers.map(Ly => Ly.bus.gain.value) });
+  }
+  function snapshotA() {
     return {
       modules: E.order.map(id => ({ id, type: E.mods[id].kind, opts: optsOf(E.mods[id]) })),
       params: Object.fromEntries(E.order.map(id => [id, Object.fromEntries(E.mods[id].paramOrder.map(k => [k, E.mods[id].params[k].n]))])),
@@ -105,11 +113,19 @@ const TL = (() => {
     const m = E.mods[id]; if (!m || !d) return;
     const c = JSON.parse(JSON.stringify(d));
     if (m.kind === 'StepSeq') { m.pats = c.pats; m.cur = c.cur; m.song = c.song; m.songOn = c.songOn; m.next = null; m.ui?.renderAll(); }
-    if (m.kind === 'Drums') { m.pat = c.pat; m.mute = c.mute; m.ui?.renderGrid(); }
-    lastData[id] = JSON.stringify(dataOf(m));
+    if (m.kind === 'Drums') { if (c.pats) { m.pats = c.pats; m.cur = c.cur ?? 0; m.song = c.song || m.song; m.songOn = !!c.songOn; } else if (c.pat) m.pat = c.pat; m.mute = c.mute; m.ui?.renderGrid(); }
+    lastData[keyOf(E.L, id)] = JSON.stringify(dataOf(m));
   }
   function addMod(id, type, opts = {}) { if (E.mods[id] || !Mods.TYPES[type]) return; UI.createModule(type, { id, ...opts }); }
   function restore(s) {
+    E.within(0, () => restoreA(s));
+    T.applying = true;
+    try {
+      if (s.layerB) { Layers.clear(1); Layers.load(1, s.layerB); }
+      if (s.buses) s.buses.forEach((g, L) => E.fadeLayer(L, g, 0.05));
+    } finally { T.applying = false; }
+  }
+  function restoreA(s) {
     T.applying = true;
     try {
       const want = new Set(s.modules.map(m => m.id));
@@ -128,14 +144,19 @@ const TL = (() => {
   // ======================= PLAYBACK =======================
   const glowKnob = (id, key) => { const el = UI.knobs[id + '.' + key]; if (!el) return; el.classList.add('ai'); clearTimeout(el._tlg); el._tlg = setTimeout(() => el.classList.remove('ai'), 600); };
   function applyEvent(ev) {
+    const [L, mid] = parseKey(ev.mod);
+    return E.within(ev.mod ? L : E.L, () => applyEvent0(ev, mid));
+  }
+  function applyEvent0(ev, mid) {
     T.applying = true;
     try {
-      if (ev.kind === 'param') { const p = E.mods[ev.mod]?.params[ev.key]; if (p) { p.setNorm(ev.n); glowKnob(ev.mod, ev.key); } }
+      if (ev.kind === 'param') { const p = E.mods[mid]?.params[ev.key]; if (p) { p.setNorm(ev.n); glowKnob(mid, ev.key); } }
       else if (ev.kind === 'cable') {
         if (ev.op === 'connect') { if (E.mods[ev.from.mod] && E.mods[ev.to.mod]) E.connect(ev.from, ev.to, { ai: true }); }
         else { const c = E.findCable(ev.to.mod, ev.to.port); if (c) E.disconnect(c, { ai: true }); }
-      } else if (ev.kind === 'module') { if (ev.op === 'add') addMod(ev.mod, ev.type, ev.opts); else if (!FIXED.has(ev.mod)) UI.removeModule(ev.mod); }
-      else if (ev.kind === 'data') setData(ev.mod, ev.data);
+      } else if (ev.kind === 'module') { if (ev.op === 'add') addMod(mid, ev.type, ev.opts); else if (!FIXED.has(mid)) UI.removeModule(mid); }
+      else if (ev.kind === 'data') setData(mid, ev.data);
+      else if (ev.kind === 'layerfade') E.fadeLayer(ev.L, ev.to, ev.sec || 0.05);
       else if (ev.kind === 'transport') { ev.run ? E.start() : E.stop(); }
       else if (ev.kind === 'marker') { AI.think('Timeline', ev.text); }
     } catch (e) { console.error(e); } finally { T.applying = false; }
@@ -153,7 +174,7 @@ const TL = (() => {
   function scheduleClips() {
     playSrcs.forEach(s => { try { s.stop(); } catch (e) { /* done */ } }); playSrcs = [];
     if (!T.playing || !T.clips.length) return;
-    const tape = E.mods.tape; if (!tape) return;
+    const tape = E.layers[0].mods.tape; if (!tape) return;
     const now = ctx.currentTime + 0.03;
     for (const c of T.clips) {
       const buf = T.bufs.get(c.buf)?.buffer; if (!buf || c.track >= 4) continue;
@@ -187,9 +208,9 @@ const TL = (() => {
     T.applying = true;
     try {
       for (const [mod, key] of lanesInUse()) {
-        const p = E.mods[mod]?.params[key]; if (!p) continue;
+        const p = mm(mod)?.params[key]; if (!p) continue;
         const v = valueAt(lanePoints(mod, key), t); if (v == null || Math.abs(v - p.n) < 0.0015) continue;
-        p.setNorm(v); if (glow) glowKnob(mod, key);
+        p.setNorm(v); if (glow) { const [L, mid] = parseKey(mod); E.within(L, () => glowKnob(mid, key)); }
       }
     } finally { T.applying = false; }
   }
@@ -228,7 +249,7 @@ const TL = (() => {
     if (T.recording) { T.recording = false; renderBar(); return; }
     if (ctx.state !== 'running') ctx.resume();
     if (!T.events.length && !T.snapshot) { T.snapshot = snapshot(); T.pos = 0; }
-    for (const id of E.order) { const d = dataOf(E.mods[id]); if (d) lastData[id] = JSON.stringify(d); }
+    for (const Ly of E.layers) for (const id of Ly.order) { const d = dataOf(Ly.mods[id]); if (d) lastData[keyOf(Ly.i, id)] = JSON.stringify(d); }
     T.recording = true; T.overdubPlay = true;
     if (!T.playing) { T.playing = true; T.startPos = T.pos; T.startCtx = ctx.currentTime; scheduleClips(); }
     if (!E.running) E.start();
@@ -238,23 +259,24 @@ const TL = (() => {
   // ======================= LANES =======================
   function lanes() {
     const out = [{ type: 'marker', label: 'Markers', color: C.marker }];
-    if (T.events.some(e => e.kind === 'transport')) out.push({ type: 'global', label: 'Transport', color: '#e9e6dc' });
+    if (T.events.some(e => e.kind === 'transport' || e.kind === 'layerfade')) out.push({ type: 'global', label: 'Transport', color: '#e9e6dc' });
     const ids = []; for (const e of T.events) if (e.mod && !ids.includes(e.mod)) ids.push(e.mod);
-    ids.sort((a, b) => (E.order.indexOf(a) + 1 || 999) - (E.order.indexOf(b) + 1 || 999));
+    const ord = k => { const [L, id] = parseKey(k); return L * 1000 + (E.layers[L].order.indexOf(id) + 1 || 999); };
+    ids.sort((a, b) => ord(a) - ord(b));
     for (const id of ids) {
-      const color = E.mods[id]?.stripe || '#888';
+      const color = mm(id)?.stripe || '#888';
       const keys = []; for (const e of T.events) if (e.kind === 'param' && e.mod === id && !keys.includes(e.key)) keys.push(e.key);
       if (!T.seen.has(id) && keys.length > 3) { T.seen.add(id); T.fold.add(id); } // busy modules start folded
       const folded = T.fold.has(id);
       out.push({ type: 'events', mod: id, label: `${folded ? '▸' : '▾'} ${modName(id)}${folded && keys.length ? ` (${keys.length} lanes)` : ''}`, color, head: true });
-      if (!folded) for (const k of keys) out.push({ type: 'param', mod: id, key: k, label: `${modName(id)} · ${E.mods[id]?.params[k]?.label || k}`, color });
+      if (!folded) for (const k of keys) out.push({ type: 'param', mod: id, key: k, label: `${modName(id)} · ${mm(id)?.params[k]?.label || k}`, color });
     }
     for (let i = 0; i < T.tracks; i++) out.push({ type: 'audio', track: i, label: `Audio ${i + 1}`, color: '#e8453c' });
     let y = 0; for (const l of out) { l.y = y; l.h = LANE_H[l.type]; y += l.h; }
     return out;
   }
-  const evLabel = e => e.kind === 'cable' ? `${e.op === 'connect' ? '⌁' : '✕'} ${e.from.mod}.${e.from.port}→${e.to.port}` : e.kind === 'module' ? (e.op === 'add' ? '＋ add ' + (e.type || '') : '－ remove') : e.kind === 'data' ? '▦ pattern' : e.kind === 'transport' ? (e.run ? '▶ run' : '■ stop') : e.text || '';
-  const laneOf = (e, L) => L.find(l => e.kind === 'param' ? (l.type === 'param' && l.mod === e.mod && l.key === e.key) : e.kind === 'marker' ? l.type === 'marker' : e.kind === 'transport' ? l.type === 'global' : (l.type === 'events' && l.mod === e.mod));
+  const evLabel = e => e.kind === 'cable' ? `${e.op === 'connect' ? '⌁' : '✕'} ${e.from.mod}.${e.from.port}→${e.to.port}` : e.kind === 'module' ? (e.op === 'add' ? '＋ add ' + (e.type || '') : '－ remove') : e.kind === 'data' ? '▦ pattern' : e.kind === 'transport' ? (e.run ? '▶ run' : '■ stop') : e.kind === 'layerfade' ? `◐ ${E.layerName(e.L)} → ${Math.round(e.to * 100)}%` : e.text || '';
+  const laneOf = (e, L) => L.find(l => e.kind === 'param' ? (l.type === 'param' && l.mod === e.mod && l.key === e.key) : e.kind === 'marker' ? l.type === 'marker' : (e.kind === 'transport' || e.kind === 'layerfade') ? l.type === 'global' : (l.type === 'events' && l.mod === e.mod));
 
   // ======================= DOM =======================
   const root = $('#tl');
@@ -403,14 +425,14 @@ const TL = (() => {
   function selected() { if (T.sel.size !== 1) return null; const id = [...T.sel][0]; return T.events.find(e => e.id === id) || T.clips.find(c => c.id === id); }
   function renderInsp() {
     const s = selected(), sig = s ? s.id + ':' + T.sel.size : 'n' + T.sel.size;
-    if (sig === inspSig && !T.inspDirty) { if (s) { const tf = insp.querySelector('.it'); if (tf && document.activeElement !== tf) tf.value = (s.t ?? s.start).toFixed(2); const vv = insp.querySelector('.iv b'); if (vv && s.kind === 'param') vv.textContent = E.mods[s.mod]?.params[s.key] ? fmtParam(s) : ''; } return; }
+    if (sig === inspSig && !T.inspDirty) { if (s) { const tf = insp.querySelector('.it'); if (tf && document.activeElement !== tf) tf.value = (s.t ?? s.start).toFixed(2); const vv = insp.querySelector('.iv b'); if (vv && s.kind === 'param') vv.textContent = mm(s.mod)?.params[s.key] ? fmtParam(s) : ''; } return; }
     inspSig = sig; T.inspDirty = false; insp.innerHTML = '';
     if (!s) { insp.textContent = T.sel.size ? `${T.sel.size} selected · Delete removes · drag to move` : 'Click an item to edit it · double-click a lane to add a point'; return; }
     const time = h('input', 'it'); time.type = 'number'; time.step = '0.01'; time.min = '0'; time.title = 'Time in seconds'; time.value = (s.t ?? s.start).toFixed(2);
     time.onchange = () => { const v = Math.max(0, +time.value || 0); if (s.kind) s.t = v; else s.start = v; dirty(); if (T.playing) scheduleClips(); };
     const lab = h('span', 'il');
     if (s.kind === 'param') {
-      lab.textContent = `${modName(s.mod)} ${E.mods[s.mod]?.params[s.key]?.label || s.key}`;
+      lab.textContent = `${modName(s.mod)} ${mm(s.mod)?.params[s.key]?.label || s.key}`;
       const r = h('input'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.001; r.value = s.n; r.oninput = () => { s.n = +r.value; dirty(); vv.querySelector('b').textContent = fmtParam(s); };
       const vv = h('span', 'iv', `<b>${fmtParam(s)}</b>`);
       const rp = h('label', 'ic', `<input type="checkbox" ${s.ramp ? 'checked' : ''}> ramp in`); rp.querySelector('input').onchange = e => { s.ramp = e.target.checked; dirty(); };
@@ -425,7 +447,7 @@ const TL = (() => {
       insp.append(lab, time, h('span', 'iv', 'gain'), gn);
     }
   }
-  const fmtParam = s => { const p = E.mods[s.mod]?.params[s.key]; if (!p) return ''; const o = p.n; p.n = s.n; const d = p.display(); p.n = o; return d; };
+  const fmtParam = s => { const p = mm(s.mod)?.params[s.key]; if (!p) return ''; const o = p.n; p.n = s.n; const d = p.display(); p.n = o; return d; };
 
   // ======================= POINTER EDITING =======================
   function hit(x, y) {
@@ -606,7 +628,7 @@ const TL = (() => {
     };
     type.onchange = fill; fill();
     const btns = h('div', 'row'), ok = h('button', 'btn primary grow', 'Add'), cancel = h('button', 'btn', 'Cancel');
-    ok.onclick = () => { const ev = { id: uid(), t: T.pos, src: 'you', ...box.get() }; T.events.push(ev); T.sel.clear(); T.sel.add(ev.id); pop.hidden = true; T.inspDirty = true; dirty(); };
+    ok.onclick = () => { const ev = { id: uid(), t: T.pos, src: 'you', ...box.get() }; if (ev.mod && E.V) ev.mod = keyOf(E.V, ev.mod); /* the dialog lists the layer on screen */ T.events.push(ev); T.sel.clear(); T.sel.add(ev.id); pop.hidden = true; T.inspDirty = true; dirty(); };
     cancel.onclick = () => { pop.hidden = true; };
     btns.append(ok, cancel); pop.append(btns);
   }
