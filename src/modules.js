@@ -296,7 +296,7 @@ const Mods = (() => {
       E.at(t, () => this.ui?.cursor(p));
       INST.forEach((ins, i) => { const v = this.pat[i][p]; if (v && !this.mute[i]) this.hit(ins, t, v === 2 ? 1 : 0.7); });
     }, 'clock in');
-    m.inEvent('TRIG', function (e) { this.hit(this.params.trigv.choice, e.time, e.vel ?? 0.8); }, 'trigger one voice');
+    m.inEvent('TRIG', function (e) { this.hit(e.inst && INST.includes(e.inst) ? e.inst : this.params.trigv.choice, e.time, e.vel ?? 0.8); }, 'trigger one voice (or the instrument a rhythm generator names)');
     m.outAudio('OUT', out, 'drum mix (minus any drum patched on its own)');
     const NAMES = { BD: 'bass drum', SD: 'snare', CP: 'clap', CH: 'closed hat', OH: 'open hat', LT: 'low tom', HT: 'high tom', RS: 'rimshot', CB: 'cowbell', CY: 'cymbal' };
     INST.forEach((ins, i) => m.outAudio(ins, indiv[i], NAMES[ins] + ' only'));

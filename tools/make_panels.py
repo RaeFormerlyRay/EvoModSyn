@@ -62,6 +62,7 @@ PANELS = {
     'attractor':(330, 'enamel',  (44, 24, 64),    0.65, 0.50, False),  # aubergine
     'macros':   (360, 'enamel',  (230, 200, 200), 0.50, 0.30, True),   # faded pink
     'follower': (280, 'brushed', (110, 120, 112), 0.55, 0.40, False),  # steel
+    'prime':   (470, 'enamel',    (168, 52, 38),   0.60, 0.45, False),  # brick red
 }
 
 

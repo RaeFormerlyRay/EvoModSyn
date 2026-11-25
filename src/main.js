@@ -105,6 +105,7 @@
   };
   $('#stop').onclick = () => AI.stop();
   $('#undoai').onclick = () => AI.undo();
+  $('#likeai').onclick = () => AI.like();
   $('#follow').onchange = e => { UI.followMode = e.target.value; UI.syncFollow?.(); };
   $('#twohands').onchange = e => UI.setTwoHands(e.target.checked);
   $('#fast').onchange = e => { UI.speed = e.target.checked ? 0.45 : 1; };

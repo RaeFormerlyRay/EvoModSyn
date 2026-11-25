@@ -115,3 +115,8 @@ The drum machine has an output per drum (BD … CY); patching one takes that dru
 The AI inserts effects and patches LFOs and macros onto synth, filter and effect knobs on most designs, varies the modulation every
 12–30 seconds (dramatic in choruses and drops, subtle in verses), fires the macro riser in builds, rotates its instruments instead of
 defaulting to the bell, and keeps repeating high drums (cowbell first) low in the mix.
+
+## Prime rhythm generator and the Good move button (daily run, 25 November 2026)
+
+- **Prime** is a four-channel rhythm generator. The Bank knob picks EUCLID, NUMERIC, TIMELINE or BREAK rhythms, Prime scrolls through them, and four faders reshape each channel (thin or fill, rotate, drift to a neighbouring rhythm, play the off-beats). Patch T1 to T4 and A1 to A4 anywhere, or patch ALL into the drum machine's TRIG to hear all four channels on their own drums.
+- **Good move** tells the AI you liked its last move, so it does more like it. It is the opposite of Undo AI move.

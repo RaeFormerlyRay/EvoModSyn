@@ -330,6 +330,13 @@ const AI = (() => {
   const group = [0, 0], groupName = [null, null]; let groupN = 0;
   const history = [];
   function remember(x) { history.push({ ...x, g: group[x.h] || 0, name: groupName[x.h] || null, L: E.V, t: performance.now() }); if (history.length > 400) history.shift(); }
+  // the opposite of undo: reward the AI's last move so it picks moves like it more often
+  A.like = function () {
+    const last = [...history].reverse().find(x => x.name);
+    if (!last) { A.log('sys', 'the AI has not made a move yet to like'); return; }
+    const q = A.q[last.name] || { v: 0, n: 0 }; q.v += 0.35 * (1 - q.v); q.n++; A.q[last.name] = q; saveQ(); drawSkills();
+    A.log('sys', `you liked the AI's move "<b>${esc(last.name)}</b>": it will reach for it more often (value ${q.v.toFixed(2)})`);
+  };
   A.undo = function () {
     const last = history[history.length - 1]; if (!last) { A.log('sys', 'nothing of the AI\'s to undo yet'); return; }
     const batch = []; while (history.length && history[history.length - 1].g === last.g) batch.push(history.pop());
@@ -650,6 +657,17 @@ const AI = (() => {
         K('reel', 'wow', clamp(0.2 + p.tr.chaos * 0.4), 'tape wobble'), K('reel', 'age', clamp(0.25 + rnd() * 0.3)),
         { do: 'route', mod: 'reel', level: 0.42, send: 0.45 }];
     },
+    // extra percussion from the rhythm generator, played on the drum machine through its TRIG input
+    primeDrums(p) {
+      const bank = { house: 'TIMELINE', techno: 'EUCLID', dnb: 'BREAK', trap: 'BREAK', acid: 'NUMERIC', experimental: 'NUMERIC', noise: 'NUMERIC' }[p.genre] || pick(['EUCLID', 'TIMELINE', 'NUMERIC', 'BREAK']);
+      const kit = pick([['RS', 'CH', 'LT', 'CP'], ['RS', 'OH', 'HT', 'SD'], ['CH', 'RS', 'LT', 'CY'], ['SD', 'RS', 'CH', 'HT']]);
+      return [{ do: 'say', text: `Adding a rhythm generator: ${bank.toLowerCase()} rhythms on four extra drum lines, reshaped by its faders.` },
+        { do: 'add', type: 'Prime', id: 'prime', why: 'four channels of extra percussion' }, P('clock.CLK', 'prime.CLK', 'follows the master clock'),
+        K('prime', 'bank', bank), K('prime', 'prime', rnd(), 'pick a base rhythm'), K('prime', 'len', pick(['16', '16', '12', '32'])),
+        ...kit.map((d, i) => K('prime', 'i' + (i + 1), d)), K('prime', 'f1', clamp(0.3 + rnd() * 0.3)), K('prime', 'f2', rnd()), K('prime', 'f3', clamp(0.2 + rnd() * 0.3)), K('prime', 'f4', clamp(0.1 + p.tr.chaos * 0.4)),
+        K('prime', 'prob', clamp(0.95 - p.tr.chaos * 0.25), 'a little chance keeps it human'),
+        P('prime.ALL', 'drums.TRIG', 'all four channels play the drum machine')];
+    },
     // put a voice through a low-pass gate pinged by its own sequencer: plucked, woody notes
     lpgOn(voice) {
       const nc = E.findCable(voice, 'NOTE'), srcM = nc && E.mods[nc.from.mod], trig = srcM ? (srcM.outs.GATE ? `${srcM.id}.GATE` : srcM.outs.TRIG ? `${srcM.id}.TRIG` : null) : null;
@@ -753,9 +771,9 @@ const AI = (() => {
   const RECIPES = {
     acid: p => ({ bpm: 128 + Math.round(rnd() * 8), kit: '909', acts: [...L.drums(p, 'acid', '909'), ...L.acid(p), ...L.workoutDrums('RS', '1/16', 5, 0.85), ...(cha(p) > 0.45 || agg(p) > 0.6 ? L.geiger(p) : []), ...(p.mode === 'perform' ? L.slopeTo('acid.CUT') : [])] }),
     dubstep: p => ({ bpm: 140, acts: [...L.drums(p, 'half', '909'), ...L.titan(p, true), ...L.workoutDrums('CH', '1/16T', 7, 0.6), ...(cha(p) > 0.45 ? [...L.geiger(p), ...L.geigerDrums()] : [])] }),
-    dnb: p => ({ bpm: 172, acts: [...L.drums(p, 'dnb', '909'), ...L.titan(p, false, 'reese'), ...(rnd() < 0.35 ? L.bodies(p, 'STRING', 4) : L.reelLayer(p, pick(['STRINGS', 'CHOIR', 'CELLO']))), ...L.swarmTo(['titan.CUT'], '1 BAR')] }),
+    dnb: p => ({ bpm: 172, acts: [...L.drums(p, 'dnb', '909'), ...L.titan(p, false, 'reese'), ...(rnd() < 0.35 ? L.bodies(p, 'STRING', 4) : L.reelLayer(p, pick(['STRINGS', 'CHOIR', 'CELLO']))), ...L.swarmTo(['titan.CUT'], '1 BAR'), ...(rnd() < 0.6 ? L.primeDrums({ ...p, genre: 'dnb' }) : [])] }),
     techno: p => ({ bpm: 130, acts: [...L.drums(p, 'techno', '909'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'decay', 0.2), ...L.bodies(p, 'MEMBRANE', 1), ...L.slopeTo('acid.CUT'), ...L.workoutDrums(pick(['RS', 'LT', 'CP']), '1/16', 3, 0.9), ...L.grainsOn('bodies', { size: 0.45, dens: 0.4, level: 0.35, send: 0.5 })] }),
-    house: p => ({ bpm: 124, acts: [...L.drums(p, 'house', '909'), ...L.lead(p, 'JOVE'), ...L.contourEnv('lead', 'seq2.GATE'), K('lead', 'cutoff', 0.35, 'closed down so the envelope plucks it'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'res', 0.3)] }),
+    house: p => ({ bpm: 124, acts: [...L.drums(p, 'house', '909'), ...(rnd() < 0.5 ? L.primeDrums(p) : []), ...L.lead(p, 'JOVE'), ...L.contourEnv('lead', 'seq2.GATE'), K('lead', 'cutoff', 0.35, 'closed down so the envelope plucks it'), ...L.acid(p), K('acid', 'model', 'LADDER'), K('acid', 'res', 0.3)] }),
     chip: p => ({ bpm: 150, acts: [...L.drums(p, 'chip', 'LOFI'), ...L.chip(p), ...L.lead(p, 'SEM'), K('seq2', 'oct', 1)] }),
     ambient: p => ({ bpm: 84, acts: [...L.drums(p, 'sparse', '808'), K('mixer', 'l2', 0.35), ...L.pad(p), ...L.bodies(p, pick(['MARIMBA', 'STRING']), 4), ...L.slopeTo('lead.CUT'), ...L.grainsOn('bodies', { size: 0.85, dens: 0.6, pitch: '+12', spray: 0.6, fb: 0.35, level: 0.55, send: 0.7 }), ...(rnd() < 0.6 ? L.reelLayer(p, pick(['CHOIR', 'STRINGS', 'FLUTE'])) : []), ...L.swarmTo(['grains.POS', 'grains.DENS'], '4 BAR'), K('mixer', 'verb', 0.75), K('mixer', 'dfb', 0.6)] }),
     noise: p => ({ bpm: 145, acts: [...L.drums(p, 'noise', 'DIRT'), ...L.geiger(p), ...L.geigerDrums(), ...L.titan(p, true), K('titan', 't1', 'METAL'), P('ent.CV', 'titan.CUT', 'random voltages tear at the bass filter'), P('clock.CLK', 'ent.CLK'), ...L.shTo('fold.FOLD', 'geiger.TRIG'), ...L.grainsOn('titan', { size: 0.3, dens: 0.8, pitch: '-12', spray: 0.8, fb: 0.5, level: 0.4, send: 0.2 })] }),
@@ -992,6 +1010,10 @@ const AI = (() => {
     'add clock brain': { fx: { energy: 0.5, motion: 1, novelty: 1.1 }, ok: () => canAdd() && !E.mods.work && drumsOn(), make: () => { A.lastAdd = performance.now(); return [{ do: 'say', text: 'Adding a clock brain for euclidean extra hits.' }, ...L.workoutDrums(pick(['RS', 'CB', 'CP', 'CH']), pick(['1/16', '1/8T', '1/16T']), pick([3, 5, 7, 9]), 0.8)]; } },
     'add random melody': { fx: { novelty: 1.3, chaos: 0.5, energy: 0.3 }, ok: () => canAdd() && !E.mods.marbles && idleVoices().length, make: () => { A.lastAdd = performance.now(); const v = pick(idleVoices()); return [{ do: 'say', text: `Letting a random generator play ${E.mods[v].name}, in key.` }, ...L.marblesLayer(A.prof, v)]; } },
     'add sample and hold': { fx: { novelty: 1, chaos: 0.8, motion: 0.6 }, ok: () => canAdd() && !E.mods.tools && freeCV().length, make: () => { A.lastAdd = performance.now(); const trig = E.mods.marbles ? 'marbles.T2' : E.mods.work ? 'work.O3' : 'clock.BEAT'; return [{ do: 'say', text: 'Adding sample and hold for stepped random movement.' }, ...L.shTo(pick(freeCV()), trig)]; } },
+    'add rhythm generator': { fx: { energy: 0.5, motion: 0.8, novelty: 1.2 }, ok: () => canAdd() && !E.mods.prime && drumsOn(), make: () => { A.lastAdd = performance.now(); return L.primeDrums(A.prof); } },
+    'scroll rhythm': { fx: { novelty: 0.9, motion: 0.5 }, ok: () => E.mods.prime && E.cablesFrom('prime').length, make: () => [nudge('prime', 'prime', (rnd() < 0.5 ? -1 : 1) * (0.06 + rnd() * 0.1), 'scroll to another base rhythm', 1200)] },
+    'reshape rhythm': { fx: { novelty: 0.6, motion: 0.6, energy: 0.1 }, ok: () => E.mods.prime && E.cablesFrom('prime').length, make: () => { const f = 'f' + (1 + Math.floor(rnd() * 4)); return [nudge('prime', f, (rnd() - 0.5) * 0.4, 'reshape one percussion line', 1500)]; } },
+    'thin the rhythm': { fx: { energy: -0.4, motion: -0.2 }, ok: () => E.mods.prime && E.cablesFrom('prime').length && E.mods.prime.params.prob.n > 0.5, make: () => [nudge('prime', 'prob', -0.2, 'fewer extra hits, more space')] },
     'add tape keyboard': { fx: { novelty: 1.2, energy: 0.1, bright: -0.1 }, ok: () => canAdd() && !E.mods.reel, make: () => { A.lastAdd = performance.now(); return L.reelLayer(A.prof); } },
     'add low-pass gate': { fx: { novelty: 1.1, motion: 0.5, energy: -0.1 }, ok: () => canAdd() && !E.mods.lpg && lpgTargets().length, make: () => { A.lastAdd = performance.now(); const t = lpgTargets(); return L.lpgOn(t.includes('reel') ? 'reel' : pick(t)); } },
     'change tape': { fx: { novelty: 0.9 }, ok: () => routed('reel'), make: () => [K('reel', 'tape', pick(Object.keys(Reel.TAPES).filter(t => t !== E.mods.reel.params.tape.choice)), 'swap the tape for another instrument')] },
