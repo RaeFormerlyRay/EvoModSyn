@@ -76,6 +76,16 @@
   E.on('transport', r => $('#runled').classList.toggle('on', r));
   E.on('bpm', b => { $('#bpmread').textContent = b.toFixed(1) + ' BPM'; });
   $('#bpmread').textContent = E.bpm.toFixed(1) + ' BPM';
+  // tap tempo: the average of the last few taps sets every layer's clock (a pause of 2 s starts over)
+  let taps = [];
+  $('#tapbpm').onclick = () => {
+    const t = performance.now(); if (taps.length && t - taps[taps.length - 1] > 2000) taps = [];
+    taps.push(t); taps = taps.slice(-6); if (taps.length < 3) { $('#tapbpm').textContent = 'Tap ' + taps.length; return; }
+    const bpm = Math.max(60, Math.min(200, 60000 / ((taps[taps.length - 1] - taps[0]) / (taps.length - 1))));
+    for (const L of [0, 1]) E.within(L, () => { const c = E.mods.clock; if (c) c.params.bpm.setNorm((bpm - 60) / 140); });
+    if (!E.mods.clock && !E.layers[1].mods.clock) E.setBpm(bpm);
+    $('#tapbpm').textContent = 'Tap'; AI.log?.('sys', `you tapped the tempo: ${bpm.toFixed(1)} BPM`);
+  };
   // remember which layers the AI may use
   try { const v = localStorage.getItem('patchmind.layermode'); if (v) $('#layermode').value = v; } catch (e) { /* no storage */ }
   $('#layermode').addEventListener('change', () => { try { localStorage.setItem('patchmind.layermode', $('#layermode').value); } catch (e) { /* no storage */ } });

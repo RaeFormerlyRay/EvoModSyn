@@ -426,3 +426,4 @@ canvas.scr.flash{box-shadow:0 0 0 1px #fff8,0 0 14px #fff6}
 #tutorbubble[data-vert="b"] .tb-tail{top:auto;bottom:-10px;border-bottom:0;border-top:10px solid #000}
 body.tutor #tutorskip{border-color:#2b6b73;color:var(--ai)}
 @media (prefers-reduced-motion: reduce){#tutorbubble{transition:none}#tutorbubble .tb-skip{animation:none}}
+.btn.tap{padding:5px 10px;font-size:11px}
