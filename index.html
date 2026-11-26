@@ -9,7 +9,7 @@
 <title>PatchMind Modular</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans+Condensed:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans+Condensed:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Pixelify+Sans:wght@400;500&display=swap">
 <link rel="stylesheet" href="src/style.css">
 
 <header class="top">
@@ -70,6 +70,11 @@
         <option value="off">View stays put</option>
       </select>
       <label class="check"><input type="checkbox" id="fast"> Quick moves</label>
+    </div>
+    <div class="row tutorrow">
+      <label class="check" title="The AI slows down and explains every step in a bubble next to its hand"><input type="checkbox" id="tutor"> Tutor Mode</label>
+      <select id="tutorpace" aria-label="Tutor reading pace" title="How long each explanation stays up"><option value="relaxed">Read: relaxed</option><option value="normal" selected>Read: normal</option><option value="quick">Read: quick</option></select>
+      <button class="btn grow" type="button" id="tutorskip" disabled title="Speed up to the next step (N key)">Skip to next step ⏭</button>
     </div>
 
     <div class="thought" id="thought"><span class="state" id="aistate">Idle</span><span id="aitext">Type an action, set a personality, then press Perform. The AI will patch, tweak, listen and keep playing.</span></div>
@@ -159,6 +164,7 @@
 <script src="src/timeline.js"></script>
 <script src="src/mix.js"></script>
 <script src="src/layers.js"></script>
+<script src="src/tutor.js"></script>
 <script src="src/main.js"></script>
 <!--BODY-END-->
 </body>

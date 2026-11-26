@@ -17,6 +17,9 @@ const UI = (() => {
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   U.sleep = sleep;
+  // Progress of a move that lasts `base` ms at speed 1. It reads UI.speed every frame, so a move already under way
+  // speeds up or slows down when the speed changes (Tutor Mode's Skip button relies on this).
+  U.clock = base => { let k = 0, last = performance.now(); return () => { const t = performance.now(); k += (t - last) / Math.max(1, base * U.speed); last = t; return Math.min(1, k); }; };
   const dpr = () => Math.min(2, window.devicePixelRatio || 1);
   function fitCanvas(c, hgt) { const w = c.clientWidth || 200; c.width = w * dpr(); c.height = hgt * dpr(); c.style.height = hgt + 'px'; const g = c.getContext('2d'); g.setTransform(dpr(), 0, 0, dpr(), 0, 0); return { g, w, h: hgt }; }
 
@@ -513,11 +516,10 @@ const UI = (() => {
     H.el.classList.add('on'); if (label != null) H.lbl.textContent = (U.twoHands ? (hi ? '② ' : '① ') : '') + label;
     const w = ensureVisible(x, y, hi); if (w) await sleep(w * U.speed);
     const sx = H.pos.x, sy = H.pos.y, dist = Math.hypot(x - sx, y - sy);
-    const dur = (ms ?? Math.min(900, 220 + dist * 0.6)) * U.speed;
-    const t0 = performance.now();
+    const prog = U.clock(ms ?? Math.min(900, 220 + dist * 0.6));
     await new Promise(res => {
       const step = () => {
-        const k = Math.min(1, (performance.now() - t0) / dur), e = ease(k);
+        const k = prog(), e = ease(k);
         H.pos.x = sx + (x - sx) * e; H.pos.y = sy + (y - sy) * e - Math.sin(k * Math.PI) * Math.min(60, dist * 0.12);
         H.el.style.transform = `translate(${H.pos.x}px,${H.pos.y}px)`;
         if (H.temp && H.temp.followHand) H.temp.b = { x: H.pos.x, y: H.pos.y };
@@ -542,8 +544,8 @@ const UI = (() => {
       H.focus(id);
       await H.handTo(c.x, c.y, label || `${m.name} · ${p.label}`);
       el.classList.add(hi ? 'ai2' : 'ai');
-      const n0 = p.n, dur = (ms ?? 500 + Math.abs(n - n0) * 900) * U.speed, t0 = performance.now();
-      await new Promise(res => { const st = () => { const k = Math.min(1, (performance.now() - t0) / dur); p.setNorm(n0 + (n - n0) * ease(k)); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
+      const n0 = p.n, prog = U.clock(ms ?? 500 + Math.abs(n - n0) * 900);
+      await new Promise(res => { const st = () => { const k = prog(); p.setNorm(n0 + (n - n0) * ease(k)); k < 1 ? requestAnimationFrame(st) : res(); }; st(); });
       p.setNorm(n);
       setTimeout(() => el.classList.remove(hi ? 'ai2' : 'ai'), 1400);
       return true;
