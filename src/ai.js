@@ -710,12 +710,14 @@ const AI = (() => {
       if (bass) {
         ideas.push([0.3 + ag * 1.3, () => I(bass, 'Heat', { model: ag > 0.6 ? pick(['FUZZ', 'FOLD', 'RECTIFY', 'TUBE', 'PARABOLA']) : pick(['TUBE', 'TAPE']), drive: 0.25 + ag * 0.4, tone: -0.2, mix: 0.55 + ag * 0.35 }, 'grit on the bass')]);
         ideas.push([g === 'dubstep' ? 1.8 : 0.25 + ch * 0.4, () => I(bass, 'Vowel', { vowel: rnd() * 0.5, res: 0.5, drive: 0.4, mix: 0.75 }, 'a talking formant on the bass')]);
+        ideas.push([0.2 + ag * 0.3, () => I(bass, 'Twin', { mode: 'LP', poles: '24dB', cutoff: 0.42 + rnd() * 0.1, res: 0.15 + ag * 0.15, spread: 0.12, motion: 0.1, env: 0.45 + ag * 0.3, mix: 1 }, 'an envelope-opened filter on the bass')]);
         ideas.push([ch * 0.7, () => I(bass, 'Bode', { shift: 0.52 + rnd() * 0.04, fb: 0.15, mix: 0.3 }, 'a slight frequency shift for an inharmonic edge')]);
       }
       if (lead) {
         ideas.push([0.7 + calm * 0.3, () => I(lead, 'Echoes', { mode: pick(['TAPE', 'PINGPONG', 'MULTI', 'CLOUD']), time: pick([0.43, 0.5, 0.57]), fb: 0.35 + ch * 0.25, mix: 0.3 }, 'echoes around the lead')]);
         ideas.push([0.3 + calm * 0.9 + (g === 'ambient' ? 1 : 0), () => I(lead, 'Halls', { type: pick(['HALL', 'PLATE', 'CATHEDRAL', 'BLOOM', 'SPRING']), decay: 0.45 + calm * 0.3, shim: g === 'ambient' ? 0.35 : 0, mix: 0.35 }, 'a room of its own')]);
         ideas.push([0.5, () => I(lead, 'Ensemble', { mode: pick(['CHORUS', 'ENSEMBLE', 'DIMENSION', 'FLANGER', 'TZF']), depth: 0.6, mix: 0.5 }, 'width and movement')]);
+        ideas.push([0.45 + ch * 0.25, () => I(lead, 'Twin', { mode: pick(['LP', 'BAND', 'BP']), cutoff: 0.5 + rnd() * 0.12, res: 0.2 + ch * 0.2, spread: 0.3 + rnd() * 0.3, motion: 0.2 + calm * 0.3, env: 0.3, mix: 1 }, 'a stereo filter that breathes left and right')]);
         ideas.push([0.35 + ch * 0.3, () => I(lead, 'Phaser', { stages: pick([4, 8, 12]), rate: 0.25, regen: 0.5, mix: 0.6 }, 'a sweeping phaser')]);
         ideas.push([0.25 + calm * 0.4 + ch * 0.3, () => I(lead, 'Prism', { i1: pick([12, 7, 5, -12]), i2: pick([7, 19, -5, 12]), fb: 0.3 + ch * 0.3, mix: 0.3 }, 'cascading harmonies')]);
         ideas.push([g === 'ambient' || calm > 0.5 ? 0.9 : 0.25, () => I(lead, 'Cassette', { age: 0.35 + rnd() * 0.3, wow: 0.35, mix: 0.8 }, 'a worn tape colour')]);
@@ -894,7 +896,7 @@ const AI = (() => {
     Echoes: [['fb', 0.12, 0.3], ['time', 0.02, 0.06], ['tone', 0.15, 0.3]], Halls: [['mix', 0.12, 0.3], ['shim', 0.15, 0.35], ['tone', 0.12, 0.25]],
     Ensemble: [['depth', 0.2, 0.4], ['rate', 0.15, 0.35]], Phaser: [['center', 0.2, 0.45], ['regen', 0.15, 0.3]], Prism: [['fb', 0.15, 0.3], ['mix', 0.15, 0.35]],
     Horizon: [['size', 0.1, 0.3], ['chaos', 0.15, 0.4]], Cassette: [['age', 0.15, 0.3], ['wow', 0.2, 0.4]], Sympathy: [['bright', 0.2, 0.4], ['mix', 0.15, 0.3]],
-    Pump: [['pump', 0.2, 0.45]], Mixer: []
+    Pump: [['pump', 0.2, 0.45]], Twin: [['cutoff', 0.1, 0.25], ['spread', 0.15, 0.35], ['motion', 0.15, 0.35]], Mixer: []
   };
   const heardBy = id => routed(id) || E.cables.some(c => c.from.mod === id && E.mods[c.to.mod]?.kind === 'Monitor');
   function modTargets() {
@@ -912,7 +914,7 @@ const AI = (() => {
   }
   // words in a request that name an effect
   function fxWords(t) {
-    const map = [[/reverb|hall|room|space|cathedral/i, 'Halls'], [/delay|echo/i, 'Echoes'], [/chorus|ensemble|flang|dimension/i, 'Ensemble'], [/phaser|phasing/i, 'Phaser'], [/distort|drive|fuzz|crush|bitcrush|saturat|fold/i, 'Heat'], [/frequency shift|bode|ring mod|barber/i, 'Bode'], [/resonat|sympathetic/i, 'Sympathy'], [/vowel|formant|talk|yoi/i, 'Vowel'], [/compress|sidechain|pump|ott|squash|glue/i, 'Pump'], [/stutter|glitch|beat repeat|tape stop|reverse/i, 'Stutter'], [/harmoni|pitch shift|shimmer|octaver/i, 'Prism'], [/cassette|lo-?fi|tape wobble|vhs/i, 'Cassette'], [/feedback network|chaos verb|black hole|drone/i, 'Horizon']];
+    const map = [[/reverb|hall|room|space|cathedral/i, 'Halls'], [/delay|echo/i, 'Echoes'], [/chorus|ensemble|flang|dimension/i, 'Ensemble'], [/phaser|phasing/i, 'Phaser'], [/distort|drive|fuzz|crush|bitcrush|saturat|fold/i, 'Heat'], [/frequency shift|bode|ring mod|barber/i, 'Bode'], [/resonat|sympathetic/i, 'Sympathy'], [/vowel|formant|talk|yoi/i, 'Vowel'], [/compress|sidechain|pump|ott|squash|glue/i, 'Pump'], [/stutter|glitch|beat repeat|tape stop|reverse/i, 'Stutter'], [/harmoni|pitch shift|shimmer|octaver/i, 'Prism'], [/cassette|lo-?fi|tape wobble|vhs/i, 'Cassette'], [/feedback network|chaos verb|black hole|drone/i, 'Horizon'], [/stereo filter|filter sweep|wah|twin filter/i, 'Twin']];
     const want = map.filter(([re]) => re.test(t)).map(([, ty]) => ty); if (!want.length) return [];
     const bass = ['titan', 'acid'].find(routed), lead = E.order.find(id => routed(id) && ['Analog', 'Chip', 'Bodies', 'Reel'].includes(E.mods[id].kind) && id !== bass) || bass;
     const onDrums = { Pump: 1, Stutter: 1 }, onBass = { Heat: 1, Vowel: 1 };
@@ -1172,7 +1174,7 @@ ACTIONS (JSON objects):
 {"do":"fire","mod":"stut2","type":"REPEAT|REVERSE|STOP|SPIN"}  (a glitch right now)
 {"do":"say","text":"short first-person narration of your intent"}
 
-ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}${t.desc ? ': ' + t.desc : ''}, ids like ${t.prefix}3)`).join('; ')}. CV outputs swing about -1..1 (Contour 0..1); a voice CUT input moves the cutoff 2 octaves per unit. Modulation modules (Contour, Swarm, Toolbox) make complex patches: patch their outputs into CUT, FOLD, CV, POS and similar inputs. Workout and Marbles outputs are events (ev) for TRIG/CLK/NOTE inputs. Effects (Halls, Echoes, Ensemble, Phaser, Heat, Bode, Sympathy, Vowel, Pump, Stutter, Prism, Cassette, Horizon) go in with "insert". Modulation sources (Orbit, Performer, Attractor, Macros, Follower, Swarm, Contour) should be used OFTEN: drop their outputs onto synth, filter and effect knobs with "mod", subtle depths (0.05-0.2) for verses, dramatic ones (0.3-0.6) for drops and choruses. Do not use the cowbell (CB) or bells more than rarely, and keep high repeating sounds low in the mix. Vary the instruments: do not default to the Bodies bell. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
+ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}${t.desc ? ': ' + t.desc : ''}, ids like ${t.prefix}3)`).join('; ')}. CV outputs swing about -1..1 (Contour 0..1); a voice CUT input moves the cutoff 2 octaves per unit. Modulation modules (Contour, Swarm, Toolbox) make complex patches: patch their outputs into CUT, FOLD, CV, POS and similar inputs. Workout and Marbles outputs are events (ev) for TRIG/CLK/NOTE inputs. Effects (Halls, Echoes, Ensemble, Phaser, Heat, Bode, Sympathy, Vowel, Pump, Stutter, Prism, Cassette, Horizon, Twin) go in with "insert". Modulation sources (Orbit, Performer, Attractor, Macros, Follower, Swarm, Contour) should be used OFTEN: drop their outputs onto synth, filter and effect knobs with "mod", subtle depths (0.05-0.2) for verses, dramatic ones (0.3-0.6) for drops and choruses. Do not use the cowbell (CB) or bells more than rarely, and keep high repeating sounds low in the mix. Vary the instruments: do not default to the Bodies bell. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
 
 Reply with JSON only:
 {"summary":"one sentence","targets":{"energy":0-1,"brightness":0-1},

@@ -120,3 +120,8 @@ defaulting to the bell, and keeps repeating high drums (cowbell first) low in th
 
 - **Prime** is a four-channel rhythm generator. The Bank knob picks EUCLID, NUMERIC, TIMELINE or BREAK rhythms, Prime scrolls through them, and four faders reshape each channel (thin or fill, rotate, drift to a neighbouring rhythm, play the off-beats). Patch T1 to T4 and A1 to A4 anywhere, or patch ALL into the drum machine's TRIG to hear all four channels on their own drums.
 - **Good move** tells the AI you liked its last move, so it does more like it. It is the opposite of Undo AI move.
+
+## Twin stereo filter and tap tempo (daily run, 26 November 2026)
+
+- **Twin** is a stereo dual filter: LP, BP, HP, BAND (a low cut into a low-pass) or NOTCH, at 12 or 24 dB. Spread pulls the left and right cutoffs apart, Motion drifts them in opposite directions, Env opens them as the input gets louder, and Drive warms the input. Resonance stops short of screaming and the cutoff stays out of the shrill top octave. The AI inserts it on leads and basses, modulates it, and adds it when you ask for a "stereo filter" or a "filter sweep".
+- **Tap** next to the tempo readout: tap three or more times in time and both layers' clocks follow.
