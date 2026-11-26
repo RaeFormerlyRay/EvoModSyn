@@ -31,6 +31,7 @@ const Mix = (() => {
     if (k === 'Geiger') return 'fx';
     if (k === 'Grains') return 'texture';
     if (k === 'Titan') return 'bass';
+    if (k === 'Sampler') { const fam = Samples.INFO[m.params.bank.choice]?.family; if (fam === 'texture') return 'texture'; if (fam === 'fx') return 'fx'; if (fam === 'breaks') return 'arp'; }
     if (m.ins.NOTE) {
       const c = E.findCable(id, 'NOTE'), src = c && E.mods[c.from.mod];
       if (!src) return 'other';
@@ -39,6 +40,7 @@ const Mix = (() => {
         const oct = +src.params.oct.choice;
         return oct <= 2 ? 'bass' : (k === 'Chip' || k === 'Bodies') ? 'arp' : 'lead';
       }
+      if (src.kind === 'Comper') return 'other'; // chords sit behind the lead
       return (k === 'Bodies' && src.kind === 'Geiger') ? 'texture' : 'arp';
     }
     // a processor (filter, folder): it plays whatever feeds it

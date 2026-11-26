@@ -63,24 +63,26 @@ const Song = (() => {
     const scale = E.mods.seq1?.params.scale.choice || 'MINOR', role = s.role;
     const prev = S.progs[role];
     // repeated sections keep their harmony (that is what makes them recognisable); verse 2 sometimes varies it
-    let prog = prev && (role !== 'verse' || rnd() < 0.7) ? prev.slice() : T.progressionFor(role, scale, prev);
-    const cad = T.cadence(role, prog, scale); prog = cad.prog; S.progs[role] = S.progs[role] || prog;
+    const G = Genres.get(S.p?.genre);
+    let prog = prev && (role !== 'verse' || rnd() < 0.7) ? prev.slice() : T.progressionFor(role, scale, prev, G);
+    const cad = prog.length > 4 ? { prog, kind: G?.id === 'blues' ? 'the 12-bar turnaround' : 'the genre\'s own form' } : T.cadence(role, prog, scale); prog = cad.prog; S.progs[role] = S.progs[role] || prog;
     const R = T.ROLES[role];
-    s.prog = prog; s.hr = R.hr; s.cadence = cad.kind; s.chords = prog.map(d => T.chordName(scale, d)).join(' – ');
+    const ghr = G?.hr && (G.hr[role] ?? (['chorus', 'drop', 'post', 'solo'].includes(role) ? G.hr.chorus : ['build', 'pre'].includes(role) ? null : G.hr.verse));
+    s.prog = prog; s.hr = ghr || R.hr; s.cadence = cad.kind; s.chords = prog.map(d => T.chordName(scale, d)).join(' – ');
     s.parts = {};
-    const half = ['dubstep'].includes(S.p?.genre);
+    const half = !!G?.half || ['dubstep'].includes(S.p?.genre);
     for (const [id, part] of Object.entries(S.parts)) {
       let line;
-      if (part === 'bass') line = T.bassLine(role, half);
+      if (part === 'bass') line = T.bassLine(role, half, G);
       else if (part === 'arp') line = T.arpLine(role);
-      else if (role === 'chorus' || role === 'drop') { line = T.melodyLine(role, { hook: S.hook, chaos: S.p?.tr.chaos }); if (!S.hook) S.hook = line.notes; line.idea = S.hook === line.notes ? 'the hook' : 'the hook, varied'; }
-      else if (role === 'verse' && S.verse) { line = T.melodyLine(role, { hook: AI.variation(S.verse, 'B').notes, chaos: S.p?.tr.chaos }); line.idea = 'verse melody developed from verse 1'; }
+      else if (role === 'chorus' || role === 'drop') { line = T.melodyLine(role, { hook: S.hook, chaos: S.p?.tr.chaos, G }); if (!S.hook) S.hook = line.notes; line.idea = S.hook === line.notes ? 'the hook' : 'the hook, varied'; }
+      else if (role === 'verse' && S.verse) { line = T.melodyLine(role, { hook: AI.variation(S.verse, 'B').notes, chaos: S.p?.tr.chaos, G }); line.idea = 'verse melody developed from verse 1'; }
       else if ((role === 'intro' || role === 'outro') && S.hook && R.lead === 'hint') { const n = S.hook.map((v, i) => i < 8 && v != null && rnd() < 0.6 ? v : null); line = { notes: n, accents: [], slides: [], idea: 'a fragment of the hook' }; }
-      else { line = T.melodyLine(role, { chaos: S.p?.tr.chaos }); if (role === 'verse') S.verse = line.notes; }
+      else { line = T.melodyLine(role, { chaos: S.p?.tr.chaos, G }); if (role === 'verse') S.verse = line.notes; }
       if (s.final && part === 'arp') line = T.arpLine('chorus');
       s.parts[id] = line;
     }
-    s.drums = T.drumsFor(role, S.base);
+    s.drums = T.drumsFor(role, S.base, undefined, G);
     s.planned = true;
   }
   // the actions that write a planned section into its pattern banks, done by the AI hand
@@ -107,6 +109,8 @@ const Song = (() => {
       partsTxt: Object.entries(S.parts).map(([id, part]) => { const m = E.mods[id]; return `${id} (${part}, drives ${E.cablesFrom(id, 'NOTE').map(c => c.to.mod).join('+')}, octave ${m.params.oct.choice})`; }).join('; '),
       prevTxt: S.sections.filter(x => x.planned && x !== s).slice(-3).map(x => `${x.name}: chords ${x.prog?.join(',')}; ` + Object.entries(x.parts || {}).map(([id, l]) => `${id} ${l.notes.map(v => v == null ? '.' : v).join(' ')}`).join(' | ')).join('\n') }));
     const prompt = `${T.PRIMER}
+
+${Genres.primer(S.p?.genre)}
 
 You are writing the next section of a song that is playing live on a modular synth. Key: ${root} ${scale}. Genre: ${S.p?.genre}. Personality: ${S.p?.persona}.
 SECTION: ${s.name} (role ${s.role}), ${s.bars} bars, energy ${Math.round(s.energy * 100)}%. Purpose: ${s.why}.
@@ -186,6 +190,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     const d = E.mods.drums; if (d) d.mute = d.INST.map(() => false);
     AI.target.energy = s.energy;
     scene(s, t);
+    try { genreScene(s, t, S.sections[i + 1]); } catch (e) { console.error(e); }
     if (s.final && !S.lift && rnd() < 0.5) lift(t);
     E.at(t, () => {
       S.cur = i; render();
@@ -209,16 +214,17 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       if (s.bars - k === 1) E.fadeLayer(nx.layer || 0, 0, barS * 0.25, t);
     }
     E.within(s.layer || 0, () => inside0(s, nextBar, t));
+    try { genreBar(s, nextBar - s.start, t, nx); } catch (e) { console.error(e); }
   }
   function inside0(s, nextBar, t) {
     const k = nextBar - s.start, left = s.bars - k, d = E.mods.drums;
     const isBuild = s.role === 'build' || s.role === 'pre';
     if (isBuild && d) {
       if (left === 1) { // the pull: kick and bass drop out for the last bar, snare rolls, then everything pushes back in
-        d.pats[PULL] = bankFromRows(T.drumsFor(s.role, S.base, 'pull')); d.queue(PULL);
+        d.pats[PULL] = bankFromRows(T.drumsFor(s.role, S.base, 'pull', Genres.get(S.p?.genre))); d.queue(PULL);
         for (const [id, part] of Object.entries(S.parts)) { const m = E.mods[id]; if (!m) continue; if (part === 'bass') { m.pats[7] = m.pats[7].map(x => ({ ...x, g: 0 })); m.queue(7); } }
         E.at(t, () => log('pull: kick and bass out for one bar'));
-      } else if (k === Math.floor(s.bars / 2)) { d.pats[ROLL] = bankFromRows(T.drumsFor(s.role, S.base, 'roll')); d.queue(ROLL); E.at(t, () => log('build: snare roll doubles up')); }
+      } else if (k === Math.floor(s.bars / 2)) { d.pats[ROLL] = bankFromRows(T.drumsFor(s.role, S.base, 'roll', Genres.get(S.p?.genre))); d.queue(ROLL); E.at(t, () => log('build: snare roll doubles up')); }
       return;
     }
     if (left === 1 && d && s.bars >= 4) { d.pats[FILL] = bankFromRows(T.drumsFor(s.role, d.INST.reduce((o, ins, r) => { const x = d.pats[s.dslot][r].map(v => v === 2 ? 'X' : v ? 'x' : '.').join(''); if (/[xX]/.test(x)) o[ins] = x; return o; }, {}), 'fill')); d.queue(FILL); E.at(t, () => log('fill into the next section')); return; }
@@ -258,6 +264,38 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
       for (const L of [0, 1]) E.within(L, () => { for (const id of [...Object.keys(S.parts), 'ent', 'marbles']) { const p = E.mods[id]?.params.root; if (p) p.setNorm(p.normOf(DSP.NOTE_NAMES[(p.value + S.lift) % 12])); } });
       log(`key lift: up ${S.lift} semitone${S.lift > 1 ? 's' : ''} for the final chorus`);
     }, Math.max(0, (t - E.ctx.currentTime - 0.18) * 1000));
+  }
+
+  // ======================= GENRE MOVES =======================
+  // what a genre does as a section starts: the chord player's rhythm follows the section, FX hit the drops
+  const mods = (L, kind) => E.within(L, () => E.order.map(id => E.mods[id]).filter(m => m.kind === kind));
+  function genreScene(s, t, nx) {
+    const G = Genres.get(S.p?.genre); if (!G) return;
+    const L = s.layer || 0, barS = 16 * E.sixteenth();
+    for (const m of mods(L, 'Comper')) {
+      const base = m._style || (m._style = m.params.style.choice);
+      const st = ['intro', 'outro', 'break'].includes(s.role) ? (base === 'ARP' ? 'ARP' : 'PAD') : s.role === 'bridge' ? (base === 'PAD' ? 'PAD' : 'HALF') : ['build', 'pre'].includes(s.role) ? (base === 'PAD' ? 'HALF' : 'POP') : base;
+      const dens = DSP.clamp(0.25 + s.energy * 0.7);
+      E.at(t, () => { m.setRhythm(Crate.STYLES[st]); m.params.dens.setNorm(dens); log(`${esc(m.name)} plays ${st.toLowerCase()} chords for ${esc(s.name)}`); });
+    }
+    for (const m of mods(L, 'Sampler')) {
+      if (m.params.bank.choice !== 'FX' || !m.bank) continue;
+      const end = t + barS * s.bars, big = nx && ['drop', 'chorus'].includes(nx.role);
+      if (['build', 'pre'].includes(s.role) && big) { const nm = G.fam === 'edm' ? 'riser' : 'reverse cymbal', d = m.shot(nm, end, 0.6); E.at(end - d, () => log(`${nm} into ${esc(nx.name)}`)); }
+      if (['drop', 'chorus'].includes(s.role) && (s.final || s.role === 'drop' || rnd() < 0.5)) { m.shot(G.fam === 'edm' ? 'impact' : 'cymbal swell', null, 0.55, t); E.at(t, () => log(`impact on ${esc(s.name)}`)); }
+      if (s.role === 'break' && rnd() < 0.7) m.shot('downlifter', null, 0.5, t);
+    }
+    if (G.wobble && ['drop', 'chorus'].includes(s.role)) s._wob = pick(G.wobble);
+  }
+  // inside a section, bar by bar: the dubstep wobble changes rate in time with the bar
+  function genreBar(s, k, t, nx) {
+    const G = Genres.get(S.p?.genre); if (!G || !s._wob) return;
+    const rate = s._wob[k % s._wob.length];
+    for (const m of mods(s.layer || 0, 'Titan')) {
+      const p = m.params.wrate, n = p.normOf(rate); if (n == null || Math.abs(n - p.n) < 1e-3) continue;
+      E.at(t, () => { p.setNorm(n); if (k % 4 === 0) log(`wobble: ${esc(m.name)} rate ${rate}, changing every bar`); });
+    }
+    void nx;
   }
 
   // ======================= ANTI-SAMENESS =======================

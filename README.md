@@ -13,7 +13,7 @@ python3 -m http.server 8000
 
 Press **Power on** (browsers only allow sound after a click), type an action such as "Design an acid bass patch" or "Play a full 15 minute acid live performance", set the performer's personality, and press **Perform**.
 
-`python3 build.py` inlines everything into `dist/patchmind.html`, a single page that can be published as a Claude artifact.
+`python3 build.py` inlines everything into `dist/patchmind.html`, a single page that can be published as a Claude artifact. The sample library is copied next to it as `dist/samples/` and loaded on demand, so the page itself stays small.
 
 ## Modules
 
@@ -120,6 +120,14 @@ defaulting to the bell, and keeps repeating high drums (cowbell first) low in th
 
 - **Prime** is a four-channel rhythm generator. The Bank knob picks EUCLID, NUMERIC, TIMELINE or BREAK rhythms, Prime scrolls through them, and four faders reshape each channel (thin or fill, rotate, drift to a neighbouring rhythm, play the off-beats). Patch T1 to T4 and A1 to A4 anywhere, or patch ALL into the drum machine's TRIG to hear all four channels on their own drums.
 - **Good move** tells the AI you liked its last move, so it does more like it. It is the opposite of Undo AI move.
+
+## Genres, the Sampler and the Comper (25 November 2026)
+
+- **The AI knows 38 genres.** Ask for dubstep, riddim, house, deep house, tech house, techno, trance, psytrance, drum and bass, jungle, UK garage, future bass, hardstyle, big room, synthwave, electro, breakbeat, footwork, moombahton or downtempo, or step outside EDM with hip hop, trap, drill, lo-fi, jazz, bossa nova, funk, disco, soul, pop, reggae, dub, reggaeton, afrobeats, gospel, blues, rock or cinematic. Each genre sets the tempo and swing, the drum patterns per section, the scales and chord progressions, how bass, chords and lead are written and voiced, the instruments, the song form and the drop. The research behind it is in `docs/research/genres.md`.
+- **Sampler** plays a 40-bank library (`samples/`, about 5.5 MB, loaded only when used): grand and electric piano, clavi, tonewheel and chamber organ, tenor sax, harmonica, recorder, harp, guitar, marimba, zithers, fretless, upright and 808 bass, cello, ukulele, brass, choir and vocal pads; eight drum kits (acoustic, jazz, boom bap, latin, hand percussion, house, hard and trap) that the drum machine can use directly; six breakbeats chopped to the tempo; vinyl and rain textures; risers, impacts and vocal chops. Knobs for pitch, start, envelope, reverse, tone, drive and dust (lo-fi crush).
+- **Comper** plays the song's chords with a rhythm (pop, stab, offbeat, reggae skank, Charleston, bossa, gospel, strum, arpeggio, pad, dembow and more) and a voicing (triads, 7ths, 9ths, shell, rootless, quartal, power, sus), with voice leading, a left hand, strum and humanize.
+- The Clock can swing the 8th notes (jazz, blues, boom bap) instead of the 16ths. Two new scales: Mixolydian and Lydian.
+- Every sample is CC0, CC-BY with credit, or synthesized here: see `samples/CREDITS.md`. Rebuild the library with `python3 tools/make_samples.py`.
 
 ## Twin stereo filter and tap tempo (daily run, 26 November 2026)
 

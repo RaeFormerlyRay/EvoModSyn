@@ -20,6 +20,7 @@ const Mods = (() => {
     const m = new M(id, { name: 'Pulse', sub: 'master clock', width: 190, stripe: '#e9e6dc', family: 'clock' });
     m.p('bpm', { label: 'Tempo', min: 60, max: 200, def: (126 - 60) / 140, nomod: true, apply: v => E.setBpm(v), fmt: v => v.toFixed(1) });
     m.p('swing', { label: 'Swing', min: 0, max: 0.6, def: 0, apply: v => { E.swing = v; }, fmt: pct });
+    m.p('sgrid', { label: 'Swing on', steps: ['16TH', '8TH'], def: 0, apply: (v, p) => { E.swingGrid = p.choice; } });
     m.outEvent('CLK', '16th notes'); m.outEvent('BEAT', 'quarter notes'); m.outEvent('BAR', 'downbeats');
     m.emitTick = (t, step, dur) => {
       m.emit('CLK', { kind: 'tick', time: t, step, dur });
@@ -28,7 +29,7 @@ const Mods = (() => {
       if (step % 16 === 0) E.fire('bar', { time: t, bar: step / 16, step, dur: dur * 16 });
       if (step % 4 === 0) E.at(t, () => m.ui?.blink(step % 16 === 0));
     };
-    m.layout = [{ custom: 'clock' }, { k: ['bpm', 'swing'], c: true }];
+    m.layout = [{ custom: 'clock' }, { k: ['bpm', 'swing', 'sgrid'], c: true }];
     return m;
   }
 
@@ -98,7 +99,7 @@ const Mods = (() => {
       cv.offset.setValueAtTime((midi - 48) / 36, t);
       for (let r = 0; r < reps; r++) {
         const tt = t + r * dur / reps;
-        const ev = { kind: 'note', time: tt, midi, dur: reps > 1 ? dur / reps * 0.6 : gateDur, acc: st.a, slide: this.prevSlide && r === 0, vel: st.a ? 1 : 0.75 };
+        const ev = { kind: 'note', time: tt, midi, deg: st.n, pos, dur: reps > 1 ? dur / reps * 0.6 : gateDur, acc: st.a, slide: this.prevSlide && r === 0, vel: st.a ? 1 : 0.75 };
         this.emit('NOTE', ev); this.emit('GATE', { kind: 'trig', time: tt, vel: ev.vel });
       }
       this.prevSlide = !!legatoNext;
@@ -116,7 +117,7 @@ const Mods = (() => {
     m.p('len', { label: 'Loop', steps: [2, 3, 4, 5, 6, 7, 8, 10, 12, 16], def: 0.65, small: true });
     m.p('color', { label: 'Noise', steps: ['WHITE', 'PINK', 'BROWN', 'CHAOS'], def: 0.34, small: true });
     m.p('range', { label: 'Range', min: 0.1, max: 3, def: 0.4, fmt: v => v.toFixed(1) + 'oct', small: true });
-    m.p('scale', { label: 'Scale', steps: DSP.SCALE_NAMES, def: 4 / 8, small: true });
+    m.p('scale', { label: 'Scale', steps: DSP.SCALE_NAMES, def: 4 / (DSP.SCALE_NAMES.length - 1), small: true });
     m.p('root', { label: 'Root', steps: DSP.NOTE_NAMES, def: 0, small: true });
     m.p('oct', { label: 'Octave', steps: [1, 2, 3, 4, 5, 6], def: 0.6, small: true });
     m.p('div', { label: 'Div', steps: [1, 2, 3, 4, 8], def: 0.25, small: true });
@@ -255,12 +256,12 @@ const Mods = (() => {
 
   // ======================= DRUM MACHINE =======================
   const INST = ['BD', 'SD', 'CP', 'CH', 'OH', 'LT', 'HT', 'RS', 'CB', 'CY'];
-  const KITS = ['808', '909', 'DIRT', 'LOFI'];
+  const KITS = ['808', '909', 'DIRT', 'LOFI', 'ACOUSTIC', 'JAZZ', 'BOOMBAP', 'LATIN', 'HAND', 'HOUSE', 'HARD', 'TRAP']; // the last eight are sampled (sampler.js)
   function Drums(id) {
     const m = new M(id, { name: 'Rhythm Composer', sub: '808 / 909-style analog drums', width: 440, stripe: '#ff7a4a', family: 'drums' });
     const bus = gain(1), pre = gain(1), sh = shaper(DSP.curveTanh(0)), out = gain(0.8);
     bus.connect(pre); pre.connect(sh); sh.connect(out);
-    m.p('kit', { label: 'Kit', steps: KITS, def: 1 / 3 });
+    m.p('kit', { label: 'Kit', steps: KITS, def: 1 / (KITS.length - 1), apply: (v, p) => { if (window.Samples && Samples.isKit(p.choice)) Samples.load(p.choice); } });
     m.p('tune', { label: 'Tune', min: 0.6, max: 1.6, curve: 'exp', def: 0.5, fmt: v => '×' + v.toFixed(2) });
     m.p('decay', { label: 'Decay', min: 0.3, max: 2.5, curve: 'exp', def: 0.45, fmt: v => '×' + v.toFixed(2) });
     m.p('drive', { label: 'Drive', def: 0.1, fmt: pct, apply: v => { { const c = DSP.curveTanh(v * 0.6); if (sh._c !== c) { sh._c = c; sh.curve = c; } } pre.gain.value = 1 + v * 3; } });
@@ -310,6 +311,20 @@ const Mods = (() => {
       const lv = this.lvl[INST.indexOf(ins)] * vel * a;
       const is8 = kit === '808', dirt = kit === 'DIRT', lofi = kit === 'LOFI';
       const dest = destOf(ins), g = gain(0); g.connect(dest);
+      // sampled kits: play the lane's sample (round robin); Tune changes speed, Decay shortens or lengthens the tail
+      if (window.Samples && Samples.isKit(kit)) {
+        const K = Samples.get(kit), list = K?.lanes?.[ins];
+        if (list && list.length) {
+          const s = ctx.createBufferSource(); s.buffer = list[Math.floor(Math.random() * list.length)]; s.playbackRate.value = tu; s.connect(g);
+          const len = s.buffer.duration / tu, keep = Math.min(len, len * Math.min(1, dk * 0.9));
+          g.gain.setValueAtTime(lv * 0.95, t); if (keep < len) g.gain.setTargetAtTime(0, t + keep * 0.6, keep * 0.15 + 0.01);
+          s.start(t); s.stop(t + len + 0.05);
+          if (ins === 'CH' && openHat) { openHat.gain.cancelScheduledValues(t); openHat.gain.setTargetAtTime(0, t, 0.005); }
+          if (ins === 'OH') openHat = g;
+          return;
+        }
+        if (!K) Samples.load(kit);
+      }
       if (ins === 'BD') {
         const dec = (is8 ? 0.55 : dirt ? 0.35 : 0.32) * dk, o = osc(dirt ? 'square' : 'sine', (is8 ? 110 : 160) * tu, t, t + dec + 0.1);
         o.frequency.exponentialRampToValueAtTime((is8 ? 46 : 52) * tu, t + (is8 ? 0.09 : 0.05));

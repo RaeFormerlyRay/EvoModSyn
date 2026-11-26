@@ -102,8 +102,8 @@
   };
 
   // ----- console -----
-  const TASKS = ['Design an acid bass patch', 'Play a full 15 minute acid live performance', 'Design a dubstep wobble bass', 'Play a 5 minute noise set with the geiger counter', 'Make a chiptune groove', 'Design an ambient marimba soundscape', 'Make it darker', 'Add the geiger counter'];
-  const PERSONAS = ['You are a noise musician who loves aggressive, hard hitting EDM', 'You are a patient minimal techno producer', 'You are a gentle ambient composer who loves soft, warm textures', 'You are a chaotic Serge-system experimentalist', 'You are a retro game composer who loves happy melodies'];
+  const TASKS = ['Make a dubstep song', 'Make a boom bap hip hop beat', 'Make a jazz tune', 'Make a pop song', 'Make a deep house track', 'Make a trap beat', 'Make a drum and bass track', 'Make a reggae song', 'Make a lofi beat', 'Make a trance anthem', 'Design an acid bass patch', 'Play a full 15 minute acid live performance', 'Design a dubstep wobble bass', 'Play a 5 minute noise set with the geiger counter', 'Make a chiptune groove', 'Design an ambient marimba soundscape', 'Make it darker', 'Add the geiger counter'];
+  const PERSONAS = ['You are a hip hop producer who digs for dusty soul samples', 'You are a jazz pianist who loves rich chords and swing', 'You are a pop songwriter who writes big, catchy hooks', 'You are a noise musician who loves aggressive, hard hitting EDM', 'You are a patient minimal techno producer', 'You are a gentle ambient composer who loves soft, warm textures', 'You are a chaotic Serge-system experimentalist', 'You are a retro game composer who loves happy melodies'];
   const chipRow = (el, list, target) => list.forEach(t => { const b = document.createElement('button'); b.className = 'chip'; b.type = 'button'; b.textContent = t; b.onclick = () => { $(target).value = t; }; $(el).append(b); });
   chipRow('#taskchips', TASKS, '#task'); chipRow('#personachips', PERSONAS, '#persona');
   try { const s = localStorage.getItem('patchmind.persona'); if (s) $('#persona').value = s; } catch (e) { /* no storage */ }

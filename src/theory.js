@@ -16,14 +16,21 @@ const Theory = (() => {
     'pop': { label: 'Pop: verse, pre-chorus, chorus', parts: [['intro', 4], ['verse', 8], ['pre', 4], ['chorus', 8], ['post', 4], ['verse', 8], ['pre', 4], ['chorus', 8], ['bridge', 8], ['chorus', 8, 'final'], ['outro', 4]] },
     'edm': { label: 'Club: build and drop', parts: [['intro', 8], ['build', 8], ['drop', 16], ['break', 8], ['build', 8], ['drop', 16, 'final'], ['outro', 8]] },
     'aaba': { label: 'AABA (32-bar song)', parts: [['intro', 4], ['verse', 8], ['verse', 8], ['bridge', 8], ['verse', 8, 'final'], ['outro', 4]] },
-    'through': { label: 'Ambient arc: A B A′ C A', parts: [['intro', 8], ['verse', 16], ['bridge', 16], ['verse', 16], ['break', 16], ['verse', 16, 'final'], ['outro', 8]] }
+    'through': { label: 'Ambient arc: A B A′ C A', parts: [['intro', 8], ['verse', 16], ['bridge', 16], ['verse', 16], ['break', 16], ['verse', 16, 'final'], ['outro', 8]] },
+    'club': { label: 'Club / DJ: groove, breakdown, drop', parts: [['intro', 16], ['verse', 16], ['build', 8], ['drop', 16], ['break', 16], ['build', 8], ['drop', 16, 'final'], ['outro', 16]] },
+    'trance': { label: 'Trance: long breakdown, anthem drop', parts: [['intro', 16], ['verse', 16], ['break', 16], ['build', 8], ['drop', 16], ['verse', 8], ['break', 16], ['build', 8], ['drop', 16, 'final'], ['outro', 8]] },
+    'hiphop': { label: 'Hip hop: 16-bar verses, 8-bar hooks', parts: [['intro', 4], ['verse', 16], ['chorus', 8], ['verse', 16], ['chorus', 8], ['bridge', 8], ['chorus', 8, 'final'], ['outro', 4]] },
+    'jazz': { label: 'Jazz: head (AABA), solos, head', parts: [['intro', 4], ['verse', 8], ['verse', 8], ['bridge', 8], ['verse', 8], ['solo', 16], ['solo', 16], ['verse', 8], ['bridge', 8], ['verse', 8, 'final'], ['outro', 4]] },
+    'blues': { label: '12-bar blues choruses', parts: [['intro', 4], ['verse', 12], ['verse', 12], ['chorus', 12], ['solo', 12], ['verse', 12], ['chorus', 12, 'final'], ['outro', 4]] }
   };
   function formFor(p, wanted) {
     if (wanted && FORMS[wanted]) return wanted;
+    const G = Genres.get(p?.genre);
     const t = (p?.task || '') + ' ' + (p?.persona || '');
     if (/aaba|32.?bar|jazz standard/i.test(t)) return 'aaba';
     if (/pre.?chorus|pop/i.test(t)) return 'pop';
     if (/verse|chorus/i.test(t)) return 'verse-chorus';
+    if (G?.form && FORMS[G.form]) return G.form;
     if (/drop|build.?up|festival|rave/i.test(t) || ['dubstep', 'dnb'].includes(p?.genre)) return 'edm';
     if (['ambient'].includes(p?.genre)) return 'through';
     return 'verse-chorus';
@@ -42,6 +49,7 @@ const Theory = (() => {
     post:   { energy: 0.6, dens: 0.4, reg: 0, hr: 2, drums: 'verse', bass: 'groove', lead: 'hint', arp: 'sparse', slot: 4, prog: 'verse', why: 'let the chorus ring out before the next verse' },
     bridge: { energy: 0.45, dens: 0.35, reg: 0, hr: 2, drums: 'half', bass: 'long', lead: 'contrast', arp: 'held', slot: 4, prog: 'bridge', why: 'contrast: new chords away from the tonic, new rhythm, so the last chorus feels fresh' },
     break:  { energy: 0.35, dens: 0.3, reg: 0, hr: 4, drums: 'break', bass: 'out', lead: 'hint', arp: 'held', slot: 4, prog: 'break', why: 'breathe: strip back to texture and space' },
+    solo:   { energy: 0.75, dens: 0.75, reg: 1, hr: 1, drums: 'full', bass: 'groove', lead: 'solo', arp: 'full', slot: 2, prog: 'verse', why: 'improvise over the form: longer lines, more notes, the band pushes harder' },
     outro:  { energy: 0.25, dens: 0.25, reg: 0, hr: 2, drums: 'intro', bass: 'long', lead: 'hint', arp: 'sparse', slot: 5, prog: 'outro', why: 'wind down and land on the tonic' }
   };
   const FINAL = { slot: 6, energy: 1, why: 'biggest chorus: everything in, extra layers, maybe a key lift' };
@@ -72,8 +80,9 @@ const Theory = (() => {
     if (fifth === 8) return R + '+';
     return R;
   }
-  function progressionFor(role, scale, prev) {
-    let opts = PROGS[ROLES[role]?.prog || role] || PROGS.verse;
+  function progressionFor(role, scale, prev, G) {
+    const gk = { drop: 'chorus', post: 'verse', pre: 'pre', build: 'build', intro: 'verse', outro: 'verse', solo: 'verse', break: 'break' }[role] || role;
+    let opts = (G?.progs && (G.progs[role] || G.progs[gk] || (['build', 'pre'].includes(role) ? null : (G.progs[role === 'bridge' || role === 'break' ? 'chorus' : 'verse'])))) || PROGS[ROLES[role]?.prog || role] || PROGS.verse;
     if (prev) { const f = opts.filter(o => o.join() !== prev.join()); if (f.length) opts = f; }
     let pr = pick(opts).slice();
     // avoid diminished chords on strong positions in 7-note scales (they sound unstable outside a dominant role)
@@ -103,6 +112,11 @@ const Theory = (() => {
     } else if (style === 'syncop') { for (let i = 0; i < 16; i++) on[i] = rnd() < (i % 4 === 0 ? 0.3 : i % 2 ? dens * 0.8 : dens * 0.5); on[pick([0, 2, 3])] = true; }
     else if (style === 'long') { on[0] = true; if (rnd() < 0.6) on[8] = true; if (rnd() < 0.3) on[ri(10, 14)] = true; }
     else if (style === 'rise') { for (let i = 0; i < 16; i++) on[i] = rnd() < dens * (0.4 + i / 16); on[0] = true; }
+    else if (style === 'swing8') { for (let i = 0; i < 16; i += 2) on[i] = rnd() < 0.55 + dens * 0.4; if (rnd() < 0.4) on[pick([0, 1, 2])] = false; for (let i = 13; i < 16; i++) if (rnd() < 0.3) on[i] = false; }
+    else if (style === 'arp16') { for (let i = 0; i < 16; i++) on[i] = i % 4 === 3 ? rnd() < 0.5 : true; }
+    else if (style === 'sparse') { const n = ri(2, 4); on[pick([0, 2, 3])] = true; for (let k = 1; k < n; k++) on[ri(4, 14)] = true; }
+    else if (style === 'riff') { const cell = Array.from({ length: 4 }, (_, i) => i === 0 || rnd() < 0.45 + dens * 0.3); for (let i = 0; i < 16; i++) on[i] = cell[i % 4] && !(i >= 12 && rnd() < 0.3); }
+    else if (style === 'callresp') { for (let i = 0; i < 8; i++) on[i] = i === 0 || rnd() < dens * 0.9; for (let i = 8; i < 16; i++) on[i] = rnd() < 0.12; }
     else { for (let i = 0; i < 16; i++) on[i] = rnd() < (STRONG.includes(i) ? 0.85 : MED.includes(i) ? 0.6 : i % 2 ? dens * 0.6 : dens * 0.8); on[0] = true; }
     return on;
   }
@@ -111,7 +125,8 @@ const Theory = (() => {
   // Melody: chord tones (0, 2, 4, 7) on strong beats, steps and passing tones between, a clear peak, ending on a stable tone.
   function melodyLine(role, opts = {}) {
     const R = ROLES[role] || ROLES.verse, dens = clamp(R.dens + (opts.chaos || 0) * 0.15 + (rnd() - 0.5) * 0.2);
-    const style = role === 'chorus' || role === 'drop' ? 'hook' : role === 'build' || role === 'pre' ? 'rise' : role === 'bridge' ? pick(['syncop', 'long']) : role === 'intro' || role === 'outro' || role === 'break' ? 'long' : 'syncop';
+    const gst = opts.G?.lead?.mel; const forced = opts.style || (gst && (gst[role] || (role === 'drop' ? gst.chorus : null) || (['intro', 'outro', 'break', 'bridge', 'pre', 'build', 'post'].includes(role) ? null : gst.verse)));
+    const style = forced ? forced : role === 'solo' ? 'syncop' : role === 'chorus' || role === 'drop' ? 'hook' : role === 'build' || role === 'pre' ? 'rise' : role === 'bridge' ? pick(['syncop', 'long']) : role === 'intro' || role === 'outro' || role === 'break' ? 'long' : 'syncop';
     const on = rhythm(dens, style);
     const lo = role === 'chorus' || role === 'drop' ? 2 : -2, hi = role === 'chorus' || role === 'drop' ? 11 : 7;
     const notes = Array(16).fill(null);
@@ -122,6 +137,8 @@ const Theory = (() => {
       if (opts.hook && opts.hook[i] != null && rnd() < 0.85) { notes[i] = opts.hook[i]; v = opts.hook[i]; continue; } // keep the hook recognisable
       const strong = i % 4 === 0;
       if (style === 'rise') v = Math.min(hi, v + pick([1, 1, 2]));
+      else if (style === 'arp16') v = [0, 2, 4, 7, 4, 2, 7, 9][(i + (opts.arpRot || 0)) % 8] + (i >= 8 && rnd() < 0.3 ? 2 : 0);
+      else if (style === 'swing8' && !strong) v = clamp(v + wpick([[1, 3], [-1, 3], [2, 1.2], [-2, 1.2], [-3, 0.5], [4, 0.3]]), lo, hi);
       else if (strong) { const ct = [0, 2, 4, 7, 9, 11].filter(x => x >= lo && x <= hi); v = ct.reduce((b, x) => Math.abs(x - v) < Math.abs(b - v) && rnd() < 0.8 ? x : b, ct[0]); if (i >= peakAt && used < 1) { v = Math.min(hi, v + pick([2, 3, 5])); used++; } }
       else v = clamp(v + wpick([[1, 3], [-1, 3], [2, 1.5], [-2, 1.5], [0, 0.6], [3, 0.4], [-3, 0.4]]), lo, hi);
       notes[i] = v;
@@ -132,11 +149,12 @@ const Theory = (() => {
     const accents = notes.map((x, i) => x != null && i % 4 === 0 ? i : -1).filter(i => i >= 0);
     const slides = notes.map((x, i) => x != null && notes[i + 1] != null && Math.abs(notes[i + 1] - x) <= 2 && rnd() < 0.15 ? i : -1).filter(i => i >= 0);
     const ratchets = Array(16).fill(1); if (style === 'rise') for (let i = 12; i < 16; i++) if (notes[i] != null) ratchets[i] = pick([1, 2, 2, 3]);
-    return { notes, accents, slides, ratchets, idea: { hook: 'a repeated hook cell', rise: 'a line that climbs into the next section', syncop: 'a syncopated, conversational line', long: 'long held tones' }[style] };
+    return { notes, accents, slides, ratchets, idea: { hook: 'a repeated hook cell', rise: 'a line that climbs into the next section', syncop: 'a syncopated, conversational line', long: 'long held tones', swing8: 'swung 8th-note phrases with chord tones on the beat', arp16: 'a gated 16th arpeggio on the chord', sparse: 'a few well-placed notes, plenty of space', riff: 'a short riff repeated', callresp: 'a call in the first half, space for the answer' }[style] };
   }
   // Bass: roots on the downbeat, fifths and octaves, approach notes into the next bar.
-  function bassLine(role, genreHalf) {
+  function bassLine(role, genreHalf, G) {
     const R = ROLES[role] || ROLES.verse, mode = R.bass, notes = Array(16).fill(null), slides = [], accents = [];
+    { const gl = G && Genres.bassLine(G, role, mode); if (gl) { if (mode === 'drive' && !gl.long) gl.idea += ', pushed harder'; return gl; } }
     if (mode === 'out') return { notes, accents, slides, idea: 'bass out to leave room' };
     if (mode === 'long') { notes[0] = 0; if (rnd() < 0.5) notes[8] = pick([0, 4, -3]); return { notes, accents: [0], slides: [], idea: 'long root notes' }; }
     if (mode === 'pedal') { const step = rnd() < 0.5 ? 2 : 1; for (let i = 0; i < 16; i += step) notes[i] = i >= 12 && rnd() < 0.4 ? 7 : 0; return { notes, accents: [0, 8], slides: [], idea: `pedal ${step === 1 ? '16ths' : '8ths'} on the root to build pressure` }; }
@@ -156,10 +174,11 @@ const Theory = (() => {
 
   // ======================= DRUM ARRANGEMENT =======================
   const P = s => s.padEnd(16, '.').slice(0, 16);
-  function drumsFor(role, base, variant) {
+  function drumsFor(role, base, variant, G) {
     const g = k => base[k] || '';
     const out = {}, set = (k, v) => { out[k] = P(v); };
     const mode = (ROLES[role] || ROLES.verse).drums;
+    { const gd = G && Genres.drums(G, role, base, mode, variant); if (gd) return gd; }
     if (variant === 'roll') { set('BD', 'x...x...x...x...'); set('SD', 'x.x.x.x.xxxxxxxx'); set('CH', 'xxxxxxxxxxxxxxxx'); return out; }
     if (variant === 'pull') { set('SD', '....x...xxxxXXXX'); set('CH', 'x.x.x.x.x.x.xxxx'); return out; } // no kick: the pull before the push
     if (variant === 'fill') { Object.keys(base).forEach(k => set(k, g(k).slice(0, 12))); set('SD', g('SD').slice(0, 12) + pick(['xxXX', 'x.xX', '.xxX'])); set('LT', '............' + pick(['..xx', 'x.x.'])); set('HT', '............' + pick(['xx..', '.x.x'])); return out; }
@@ -187,6 +206,8 @@ Drums: intro hats/percussion only; verse kick+snare+hats; build four-on-the-floo
 Builds: tension rises through density (snare roll, faster hats, 16th-note pedal bass), pitch (rising lines, filter opening), and space (more reverb and delay). Push-pull: right before the payoff, pull elements out (kick and bass drop for the last bar, a beat of near-silence), then push everything back in on the downbeat. Small push-pull waves inside sections (thin a bar, then bring it back) keep motion.
 Transitions: fill on the last bar, crash on the next downbeat, a reverb or delay throw on the last note. Final chorus lift: add a layer, open the filters further, optionally raise the key by 1-2 semitones.
 Sound design: NEVER use bell sounds of any kind (no Bodies BELL, GLASS or TUBE models, no Chip METAL wave, no bell-like FM tones); they ring over the mix and the listener hates them. Avoid farty synths (buzzy square or pulse waves in the low register through a nearly closed resonant filter, short blatty envelopes, overdriven low notes; they pile up 120-450 Hz). Prefer saw or triangle for low parts, enough cutoff for a few harmonics, moderate resonance, decays long enough to sound like notes, a clean sub under a brighter layer.\nAvoid sameness: no part should loop unchanged for long. Lead lines need a change every 8 bars or so, arps every 12, bass and drums every 16 (techno and ambient can stretch this). Vary by developing the idea (answer phrase, inversion, rhythmic displacement, ghost notes, dropping or adding a part, filter movement), not by random noise.\nNever leave high-pitched, repeating sounds on: shrill arps up in the top octaves, whistling or screaming resonance, piercing bells, chirpy chip arps, constant hi-hat sizzle and geiger clicks grate on the ears within a few bars. Use them as brief accents (a fill, a build, one phrase) and then take them out, lower them an octave, darken them or bury them in the mix.\nMixing: the kick and drums are the anchor; the bass sits just under the kick (about 1-2 dB) and stays dry and centred; the lead or hook sits up front, about 3 dB under the drums; arps and counter-melodies tuck 6-8 dB behind the lead; pads, textures and noise sit 10-13 dB down, pushed back with reverb. Only one part owns the front at a time. Re-balance whenever the arrangement changes, because a part that was right in the verse can be too loud in the chorus.\nTwo layers: the rack holds two complete, independent modular systems (Layer A and Layer B). The song can live on one layer for some sections and crossfade to the other for contrast (for example verses on A, choruses on B, a bridge on either), fading one master up as the other fades down on the downbeat. Make the two layers clearly different in sound (voice models, kit, octave, effects) but in the same key and tempo.\nArrangement: give each part its own register (bass low, chords mid, lead high) and its own rhythmic space; not everything plays all the time.
+Genres: each genre has its own tempo, swing, drum skeleton, scales, progressions, bass style, chord instrument and form (see the GENRE block when one is given). Follow it: a genre is defined by its groove and its sounds more than by its chords.
+Sampler (Crate) and chord player (Comper): Comper plays the song's chords on a rhythm with real voicings (7ths, 9ths, rootless, shell, quartal) into a Crate sampler loaded with PIANO, EPIANO, ORGAN, GUITAR, CLAV, BRASS, PLUCK, CHOIR or strings. Crate also plays BASS, UPRIGHT and 808 basses, SAX, FLUTE, HARMONICA and VOX leads, chopped breakbeats (BREAK_* banks, one slice per step), VINYL and RAIN textures, and FX (risers before drops, impacts on them).
 Notation here: sequencer notes are scale degrees relative to the current chord when the sequencer's Harmony knob is SONG (0 root, 2 third, 4 fifth, 7 octave), so one pattern follows the chord progression.`;
 
   // ======================= SOUND-DESIGN GUARDRAILS =======================

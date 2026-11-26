@@ -401,7 +401,8 @@ const AI = (() => {
       if (m.kind === 'Bodies' && out(id)) acts.push(K(id, 'model', pick(['MARIMBA', 'STRING', 'MEMBRANE'].filter(x => x !== m.params.model.choice)), 'a different body'));
       if (m.kind === 'StepSeq' && E.cablesFrom(id, 'NOTE').length && +m.params.oct.choice >= 3 && +m.params.oct.choice <= 3 && rnd() < 0.5) acts.push(K(id, 'oct', '4', 'lift the line an octave on this layer'));
     }
-    if (E.mods.drums && routed('drums')) acts.push(K('drums', 'kit', pick(Mods.KITS.filter(k => k !== E.mods.drums.params.kit.choice)), 'a different kit for this layer'), K('drums', 'drive', clamp(E.mods.drums.params.drive.n + 0.1), 'a bit more punch'));
+    const gk = (Genres.get(p.genre)?.kits || Mods.KITS.slice(0, 4)).filter(k => k !== E.mods.drums?.params.kit.choice);
+    if (E.mods.drums && routed('drums') && gk.length) acts.push(K('drums', 'kit', pick(gk), 'a different kit for this layer'), K('drums', 'drive', clamp(E.mods.drums.params.drive.n + 0.1), 'a bit more punch'));
     if (E.mods.mixer) acts.push(K('mixer', 'verb', clamp(E.mods.mixer.params.verb.n + 0.08), 'a wider space'), K('mixer', 'dtime', pick(['1/8', '3/16', '1/4']), 'a different echo'));
     if (E.order.length < 24 && rnd() < 0.5) acts.push(...newLayer(p, new Set(CORE_IDS), false));
     return acts;
@@ -436,8 +437,8 @@ const AI = (() => {
       melodic: t(/melod|pretty|beautiful|harmon|jazz|lyric|romantic|emotional/i) ? 0.7 : 0.25,
       dark: t(/dark|evil|sinister|gloom|doom|menac/i) ? 0.3 : t(/bright|happy|uplift|euphor|sunny|joy/i) ? -0.3 : 0
     };
-    let genre = null;
-    for (const [g, re] of Object.entries(GENRES)) if (re.test(task)) { genre = g; break; }
+    let genre = Genres.detect(task, persona);
+    if (!genre) for (const [g, re] of Object.entries(GENRES)) if (re.test(task)) { genre = g; break; }
     if (!genre) for (const [g, re] of Object.entries(GENRES)) if (re.test(persona)) { genre = g; break; }
     if (!genre) genre = t(/edm|club|dance|banger/i) ? (tr.aggression > 0.5 ? 'dubstep' : 'house') : 'techno';
     let mode = 'design';
@@ -698,12 +699,98 @@ const AI = (() => {
     shTo(dest, trig) {
       return [{ do: 'add', type: 'Toolbox', id: 'tools', why: 'sample and hold for stepped random modulation' }, P(trig, 'tools.TRIG', 'sample a new random value'), K('tools', 'slew', 0.3), P('tools.HOLD', dest, 'stepped random voltage')];
     },
+    // ----- a whole band from the genre knowledge base (genres.js): groove, drums, bass, chords, lead, samples -----
+    genre(p, G) {
+      const gp = Genres.pick, ag = agg(p), taken = new Set(), acts = [];
+      songKey = { root: rootAny(), scale: gp(G.scales) };
+      const bpm = Genres.bpmOf(G, p);
+      acts.push({ do: 'say', text: `${G.label} at ${bpm} BPM in ${songKey.root} ${songKey.scale.toLowerCase()}. ${G.notes.split('. ').slice(0, 2).join('. ')}.` });
+      // groove: swing amount and which grid swings
+      acts.push(K('clock', 'sgrid', G.sgrid || '16TH', G.sgrid === '8TH' ? 'swing the 8th notes' : null), K('clock', 'swing', G.swing || 0, G.swing ? `${Math.round(G.swing * 100)}% swing: ${G.swing > 0.35 ? 'a lazy, triplet-ish feel' : 'a little push and pull'}` : 'straight, machine-tight time'));
+      // drums
+      const kit = gp(G.kits || ['909']);
+      acts.push(P('clock.CLK', 'drums.CLK', 'drum machine follows the master clock'), K('drums', 'kit', kit, `${kit.toLowerCase()} kit for ${G.label.toLowerCase()}`));
+      const main = Genres.noCowbell({ ...(G.drums?.main || {}) }, !Samples.isKit(kit));
+      for (const ins of E.mods.drums.INST) acts.push({ do: 'drums', inst: ins, pattern: roughen(main[ins], p.tr.chaos * 0.5) || '................' });
+      acts.push(...E.mods.drums.INST.map(ins => ({ do: 'mute', inst: ins, on: false })));
+      acts.push(K('drums', 'drive', clamp(0.05 + ag * 0.5)), K('drums', 'decay', G.drums?.decay ?? clamp(0.4 + rnd() * 0.2)), K('drums', 'tune', 0.5), { do: 'route', mod: 'drums', level: G.drums?.level === 'soft' ? 0.58 : 0.72, send: G.fam === 'edm' ? 0.06 : 0.14 });
+      // a voice from a spec like "Crate:EPIANO" for a role
+      const voice = (spec, role) => {
+        const [type, set] = spec.split(':'), a = [];
+        const want = { bass: { Crate: 'crate', Analog: 'acid', Titan: 'titan', Reel: 'reel' }, chords: { Crate: 'keys', Reel: 'reel', Analog: 'lead' }, lead: { Crate: 'horn', Analog: 'lead', Chip: 'chip', Bodies: 'bodies', Reel: 'reel2' } }[role][type] || type.toLowerCase();
+        let id = want; if (taken.has(id)) id = E.newId(id, new Set([...taken, ...CORE_IDS])); taken.add(id);
+        if (type === 'Crate') {
+          const fam = Samples.INFO[set]?.family;
+          a.push({ do: 'add', type: 'Sampler', id, model: set, why: `a sampler for the ${role}` }, K(id, 'bank', set, `load the ${(Samples.INFO[set]?.label || set).toLowerCase()}`), K(id, 'hold', 'GATE'),
+            K(id, 'att', fam === 'wind' || fam === 'vocal' || fam === 'strings' ? 0.12 : 0.02), K(id, 'rel', role === 'bass' ? (set === '808' ? 0.3 : 0.18) : fam === 'keys' ? 0.4 : 0.3),
+            K(id, 'tone', role === 'bass' ? 0.62 : G.bright < 0.42 ? 0.7 : 0.82, role === 'bass' ? 'keep the bass round' : null));
+          if (G.extras?.includes('dust') && role !== 'bass') a.push(K(id, 'dust', 0.3 + rnd() * 0.2, 'dusty, sampled-off-vinyl grit'));
+          if (set === '808') a.push(K(id, 'drive', clamp(0.15 + ag * 0.4), 'a little growl on the 808'));
+        } else if (type === 'Analog') {
+          if (!E.mods[id]) a.push({ do: 'add', type: 'Analog', id, model: set });
+          a.push(K(id, 'model', set), K(id, 'wave', role === 'bass' ? 'SAW' : gp(['SAW', 'PULSE'])), K(id, 'cutoff', role === 'bass' ? 0.36 : 0.5), K(id, 'res', role === 'bass' ? 0.3 : 0.25), K(id, 'env', 0.45), K(id, 'decay', role === 'bass' ? 0.35 : 0.5), K(id, 'drive', clamp(0.15 + ag * 0.4)));
+        } else if (type === 'Titan') {
+          const growl = set !== 'reese';
+          a.push(K(id, 't1', growl ? pick(['GROWL', 'YOI', 'METAL']) : 'SAW→SQR'), K(id, 't2', growl ? 'SYNC' : 'SUPER'), K(id, 'uni', growl ? 0.3 : 0.8), K(id, 'sub', G.extras?.includes('sub') ? 0.75 : 0.55, 'a clean sub under the movement'),
+            K(id, 'cut', growl ? 0.38 : 0.3), K(id, 'res', clamp(0.3 + ag * 0.35)), K(id, 'wrate', growl ? pick(['1/8', '1/8T', '1/4']) : '1/2'), K(id, 'wcut', growl ? 0.75 : 0.3), K(id, 'wpos', growl ? 0.65 : 0.2),
+            K(id, 'drive', clamp(0.35 + ag * 0.55), growl ? 'drive it hard for the growl' : 'warm saturation on the reese'), K(id, 'level', 0.65));
+        } else if (type === 'Reel') { a.push({ do: 'add', type: 'Reel', id }, K(id, 'tape', set), K(id, 'sus', 0.8, 'let the tape notes ring'), K(id, 'chord', 'OFF'), K(id, 'wow', 0.15), K(id, 'oct', role === 'bass' ? '-1' : '0')); }
+        else if (type === 'Chip') a.push(K(id, 'wave', pick(['P25', 'TRI'])), K(id, 'arp', 'OFF'), K(id, 'oct', 0), K(id, 'crush', 4));
+        else if (type === 'Bodies') a.push(K(id, 'model', set || bodyModel()), K(id, 'decay', 0.5), K(id, 'bright', 0.45));
+        return { id, acts: a, type, set };
+      };
+      // bass: Sequencer B plays it, written in the genre's bass style
+      const bv = voice(gp(G.bass.v), 'bass');
+      const bl = Theory.bassLine('verse', G.half, G) || bassLine(p, G.half);
+      acts.push({ do: 'say', text: `Bass: ${bv.set ? (Samples.INFO[bv.set]?.label || bv.set) : bv.type} playing ${bl.idea}.` }, ...bv.acts,
+        P('clock.CLK', 'seq2.CLK'), P('seq2.NOTE', `${bv.id}.NOTE`, 'Sequencer B plays the bass'),
+        K('seq2', 'scale', keyScale(p)), K('seq2', 'root', keyRoot(p)), K('seq2', 'oct', bv.type === 'Titan' ? 1 : G.bass.oct ?? 2), K('seq2', 'gate', bl.long ? 0.95 : 0.6), K('seq2', 'len', 16),
+        { do: 'steps', mod: 'seq2', ...bl, why: 'bass: ' + bl.idea }, { do: 'route', mod: bv.id, level: 0.68, send: 0.04 });
+      // chords: the Comper voices the song's chords on the genre's comping rhythm
+      if (G.chords && rnd() < (G.chords.p ?? 1)) {
+        const cv = voice(gp(G.chords.v), 'chords'), st = gp(G.chords.style), vc = gp(G.chords.voicing);
+        acts.push({ do: 'say', text: `Chords: a Comper playing ${vc.toLowerCase()} voicings in a ${st.toLowerCase()} rhythm on ${cv.set ? (Samples.INFO[cv.set]?.label || cv.set + ' tapes').toLowerCase() : cv.type}.` },
+          { do: 'add', type: 'Comper', id: 'comp', why: 'a chord player that voices the chords' }, ...cv.acts,
+          P('clock.CLK', 'comp.CLK'), P('comp.NOTE', `${cv.id}.NOTE`, 'the chord player plays the chord instrument'),
+          K('comp', 'style', st, `${st.toLowerCase()} rhythm for ${G.label.toLowerCase()}`), K('comp', 'voicing', vc, `${vc.toLowerCase()} voicings`), K('comp', 'root', keyRoot(p)), K('comp', 'scale', keyScale(p)),
+          K('comp', 'oct', String(G.chords.oct ?? 3)), K('comp', 'bass', G.chords.bass || 'OFF'), K('comp', 'gate', st === 'PAD' ? 1 : st === 'SKANK' || st === 'OFFBEAT' ? 0.35 : 0.7), K('comp', 'human', G.fam === 'edm' ? 0.1 : 0.45),
+          { do: 'route', mod: cv.id, level: 0.5, send: G.fam === 'edm' ? 0.25 : 0.3 });
+        if (G.chords.fuzz) acts.push({ do: 'insert', into: cv.id, type: 'Heat', set: { model: 'FUZZ', drive: 0.55, tone: -0.1, mix: 0.9 }, why: 'distorted power chords' });
+      }
+      // lead: Sequencer A plays the melody in the genre's melodic style
+      if (G.lead && rnd() < (G.lead.p ?? 1)) {
+        const lv = voice(gp(G.lead.v), 'lead'), ml = Theory.melodyLine('verse', { G, chaos: p.tr.chaos });
+        acts.push({ do: 'say', text: `Lead: ${lv.set ? (Samples.INFO[lv.set]?.label || lv.set) : lv.type}, ${ml.idea}.` }, ...lv.acts,
+          P('clock.CLK', 'seq1.CLK'), P('seq1.NOTE', `${lv.id}.NOTE`, 'Sequencer A plays the lead'),
+          K('seq1', 'scale', keyScale(p)), K('seq1', 'root', keyRoot(p)), K('seq1', 'oct', G.lead.oct ?? 3), K('seq1', 'gate', clamp(0.5 + rnd() * 0.35)), K('seq1', 'len', 16),
+          { do: 'steps', mod: 'seq1', ...ml, why: 'lead: ' + ml.idea }, { do: 'route', mod: lv.id, level: 0.52, send: 0.3 });
+      }
+      // samples and extras
+      const ex = G.extras || [];
+      if (ex.includes('break') && rnd() < 0.85) {
+        const bk = gp(G.breaks || ['BREAK_FUNK']);
+        acts.push({ do: 'say', text: `Chopping a breakbeat (${Samples.INFO[bk].label}) under the drums: one slice per 16th, sped to the tempo.` }, { do: 'add', type: 'Sampler', id: 'brk', model: bk, why: 'a sampler for the breakbeat' },
+          K('brk', 'bank', bk), K('brk', 'chop', 'STEP'), K('brk', 'fit', 'TEMPO'), K('brk', 'hold', 'GATE'), K('brk', 'att', 0.001), K('brk', 'rel', 0.05), K('brk', 'tone', 0.8),
+          P('clock.CLK', 'brk.TRIG', 'the clock plays the break slice by slice'), { do: 'route', mod: 'brk', level: 0.42, send: 0.05 });
+      }
+      if (ex.includes('vinyl') || ex.includes('rain')) {
+        const tx = ex.includes('rain') && rnd() < 0.5 ? 'RAIN' : 'VINYL';
+        acts.push({ do: 'add', type: 'Sampler', id: 'tex', model: tx, why: tx === 'RAIN' ? 'rain behind the music' : 'vinyl crackle' }, K('tex', 'bank', tx), K('tex', 'hold', 'GATE'), K('tex', 'att', 0.2), K('tex', 'rel', 0.6), K('tex', 'tone', 0.6),
+          P('clock.BAR', 'tex.TRIG', 'restart the texture every bar'), { do: 'route', mod: 'tex', level: 0.2, send: 0.02 });
+      }
+      if (ex.includes('fx')) acts.push({ do: 'add', type: 'Sampler', id: 'fxs', model: 'FX', why: 'risers before the drops, impacts on them' }, K('fxs', 'bank', 'FX'), K('fxs', 'hold', 'FULL'), K('fxs', 'tone', 0.7), { do: 'route', mod: 'fxs', level: 0.3, send: 0.4 });
+      if (ex.includes('perc') && rnd() < 0.7) acts.push(...L.primeDrums(p));
+      if (ex.includes('hatrolls')) acts.push({ do: 'say', text: 'Trap hats: rolls in 32nds on top of the 16ths.' }, ...L.workoutDrums('CH', '1/32', pick([5, 7, 9]), 0.45));
+      if (ex.includes('pump')) acts.push({ do: 'insert', into: 'mixer', type: 'Pump', set: { glue: 0.3, ott: 0.15, pump: 0.45 + rnd() * 0.15, gain: 0.5 }, why: 'sidechain pump: the mix ducks under every kick' });
+      if (ex.includes('dub')) { const tgt = E.mods.keys || acts.some(a => a.id === 'keys') ? 'keys' : null; if (tgt) acts.push({ do: 'insert', into: tgt, type: 'Echoes', set: { mode: 'TAPE', time: 0.5, fb: 0.55, mix: 0.32 }, why: 'dub tape echo on the skank' }); }
+      return { bpm, exact: true, acts };
+    },
     // ----- effects: 1-3 inserts chosen by the personality and genre, never the same few every time -----
     fxPack(p, max) {
       const ag = agg(p), ch = cha(p), calm = p.tr.calm, g = p.genre, acts = [], room = 30 - E.order.length;
       if (room < 2) return acts;
       const bass = ['titan', 'acid'].find(routed) || E.order.find(id => E.mods[id].kind === 'Titan' && routed(id));
-      const leads = E.order.filter(id => routed(id) && ['Analog', 'Chip', 'Bodies', 'Reel', 'LPG'].includes(E.mods[id].kind) && id !== bass);
+      const leads = E.order.filter(id => routed(id) && ['Analog', 'Chip', 'Bodies', 'Reel', 'LPG', 'Sampler'].includes(E.mods[id].kind) && id !== bass && !(E.mods[id].kind === 'Sampler' && ['bass', 'breaks', 'texture', 'fx'].includes(Samples.INFO[E.mods[id].params.bank.choice]?.family)));
       const lead = leads.length ? pick(leads) : null, drums = routed('drums') ? 'drums' : null;
       const has = t => E.order.some(id => E.mods[id].kind === t && E.cables.some(c => c.from.mod === id));
       const I = (into, type, set, why, port) => ({ do: 'insert', into, port, type, set, why });
@@ -735,6 +822,7 @@ const AI = (() => {
       if (E.mods.mixer && E.findCable('monitor', 'IN')?.from.mod === 'mixer') {
         ideas.push([ag > 0.55 ? 0.7 + ag * 0.6 : 0.1, () => I('mixer', 'Pump', { glue: 0.35, ott: 0.25 + ag * 0.3, pump: /edm|dubstep|house|techno|trance|big room/i.test(p.task + ' ' + g) || ag > 0.7 ? 0.45 : 0, gain: 0.5 }, 'squash and sidechain pump on the whole mix')]);
       }
+      { const fw = Genres.get(g)?.fxw; if (fw) ideas.forEach(x => { try { const t = x[1]().type; x[0] *= fw[t] ?? 1; } catch (e) { /* keep */ } }); }
       const n = Math.min(max || (1 + (rnd() < 0.6) + (ag + ch > 1.2 ? 1 : 0)), Math.floor(room / 1));
       const chosen = [];
       for (let k = 0; k < n && ideas.length; k++) { const f = wpick(ideas.map((x, i) => [i, x[0]])); const a = ideas[f][1](); ideas.splice(f, 1); if (!has(a.type) || rnd() < 0.3) chosen.push(a); }
@@ -792,7 +880,7 @@ const AI = (() => {
   const voiceCut = () => E.order.filter(id => CUTKEY[E.mods[id].kind] && routed(id)).map(id => [id, CUTKEY[E.mods[id].kind]]);
   const activeSeqs = () => E.order.filter(id => kindIs(id, 'StepSeq') && E.cablesFrom(id, 'NOTE').length);
   const VOICE_KINDS = ['Analog', 'Titan', 'Chip', 'Bodies', 'VCFQ', 'Reel'];
-  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq', 'contour', 'swarm', 'work', 'grains', 'marbles', 'tools', 'reel', 'lpg'];
+  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq', 'contour', 'swarm', 'work', 'grains', 'marbles', 'tools', 'reel', 'lpg', 'crate', 'keys', 'comp', 'horn', 'brk', 'tex', 'tex2', 'fxs', 'reel2'];
 
   // ----- pattern variations and songs -----
   // B: a development of A, C: a stripped-back version, D: a fill. Each picks one of several ways to do it.
@@ -854,12 +942,14 @@ const AI = (() => {
   const bodyModel = () => wpick([['MARIMBA', 3], ['STRING', 3], ['MEMBRANE', 2]]);
   // A brand-new layer: add a sequencer and a voice module, patch them, write patterns and a song
   function newLayer(p, reserved, songOn) {
-    const spec = fresh(LAYERS[p.genre] || LAYERS.default), [type, model] = spec.split(':'); used(spec);
+    const Gn = Genres.get(p.genre), gpal = Gn && !Gn.legacy ? [...[].concat(Gn.lead?.v || []), ...[].concat(Gn.chords?.v || [])].filter(v => !/^Titan|^Reel/.test(v)) : null;
+    const spec = fresh(gpal?.length ? gpal : LAYERS[p.genre] || LAYERS.default); let [type, model] = spec.split(':'); used(spec);
+    if (type === 'Crate') type = 'Sampler';
     const seq = E.newId('seq', reserved); reserved.add(seq);
     const vid = E.newId(type === 'Analog' ? 'voice' : Mods.TYPES[type].prefix, reserved); reserved.add(vid);
-    const ref = E.mods.seq1, low = type === 'Titan' || (type === 'Analog' && rnd() < 0.5);
+    const ref = E.mods.seq1, low = type === 'Titan' || (type === 'Analog' && rnd() < 0.5) || (type === 'Sampler' && Samples.INFO[model]?.family === 'bass');
     const base = type === 'Chip' ? melody(p, 'chip') : low ? bassLine(p, p.genre === 'dubstep') : melody(p);
-    const acts = [{ do: 'say', text: `Adding a new layer: a sequencer driving a ${type === 'Analog' ? model + ' analog voice' : Mods.TYPES[type].label}.` },
+    const acts = [{ do: 'say', text: `Adding a new layer: a sequencer driving a ${type === 'Analog' ? model + ' analog voice' : type === 'Sampler' ? 'Crate sampler with ' + (Samples.INFO[model]?.label || model).toLowerCase() : Mods.TYPES[type].label}.` },
       { do: 'add', type: 'StepSeq', id: seq, why: 'a new sequencer for the new layer' },
       { do: 'add', type, id: vid, model, why: 'a new voice for more depth' },
       P('clock.CLK', `${seq}.CLK`), P(`${seq}.NOTE`, `${vid}.NOTE`),
@@ -871,6 +961,7 @@ const AI = (() => {
     if (type === 'Bodies') acts.push(K(vid, 'model', bodyModel()));
     if (type === 'Chip') acts.push(K(vid, 'arp', pick(['MAJ', 'MIN', 'OCT', 'OFF'])));
     if (type === 'Reel') acts.push(K(vid, 'tape', pick(['STRINGS', 'CHOIR', 'FLUTE', 'CELLO'])), K(vid, 'sus', 0.55, 'let the tape notes ring'), K(seq, 'gate', 0.95));
+    if (type === 'Sampler') acts.push(K(vid, 'bank', model, 'load the ' + (Samples.INFO[model]?.label || model).toLowerCase()), K(vid, 'rel', 0.5));
     return acts;
   }
   A.newLayer = newLayer;
@@ -1182,6 +1273,7 @@ Reply with JSON only:
  "design":[30-70 actions that build the patch from the current state, starting with a say, ending with transport run true],
  "sections":${p.mode === 'perform' ? '[5-9 sections, each {"name":"...","fraction":share of the set,"energy":0-1,"actions":[3-10 actions fired when the section starts]}]' : '[]'}}
 ${Theory.PRIMER}
+${Genres.primer(p.genre)}
 ${A.songForm ? 'A song engine will arrange the song form after your design (verse, build, chorus and so on), so design the sound and the main patterns; leave "sections" empty.\n' : ''}Build complex, layered patches: add extra sequencers and voices when they serve the music, give sequencers several patterns and a song. Make it musical and true to the personality. Be spontaneous with melodies: invent fresh motifs instead of stock riffs, vary rhythm (syncopation, rests, odd groupings, call and response), use leaps as well as steps, develop ideas across patterns (invert, transpose, answer, displace), and pick an unexpected key or mode when it suits. Random seed for this plan: ${Math.floor(rnd() * 1e6)}. Use the modules the task and personality call for.`;
     A.think('Asking Claude', 'Claude is composing a plan for the patch and the set. This can take up to a minute.');
     A.log('sys', 'sent the brief, module catalog and current patch to Claude');
@@ -1211,7 +1303,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
     A.think('Reading the brief', `Heard: ${p.genre} · ${p.mode}${p.dur ? ' · ' + fmtT(p.dur) : ''}. Personality: ${traits}.`);
     A.log('sys', `interpreted as <b>${p.genre}</b> ${p.mode}${p.dur ? ' for ' + fmtT(p.dur) : ''}; personality ${traits}`);
     await UI.sleep(900);
-    target.bright = clamp({ ambient: 0.35, dubstep: 0.45, noise: 0.75, chip: 0.7, acid: 0.55 }[p.genre] ?? 0.55) - p.tr.dark * 0.5 + p.tr.aggression * 0.1;
+    target.bright = clamp(Genres.get(p.genre)?.bright ?? 0.55) - p.tr.dark * 0.5 + p.tr.aggression * 0.1;
     target.energy = clamp(0.55 + p.tr.aggression * 0.3 - p.tr.calm * 0.35);
     target.loud = -16 + p.tr.aggression * 6 - p.tr.calm * 4;
 
@@ -1225,14 +1317,17 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       let acts, bpm;
       if (plan) { acts = plan.design; if (plan.targets) { target.energy = clamp(+plan.targets.energy || target.energy); target.bright = clamp(+plan.targets.brightness || target.bright); } }
       else {
-        songKey = null; const r = (RECIPES[p.genre] || RECIPES.techno)(p); acts = r.acts; bpm = r.bpm + Math.round(p.tr.aggression * 6 - p.tr.calm * 10);
+        songKey = null; const Gn = Genres.get(p.genre);
+        const r = Gn && !Gn.legacy ? L.genre(p, Gn) : (RECIPES[p.genre] || RECIPES.techno)(p); acts = r.acts; bpm = r.exact ? r.bpm : r.bpm + Math.round(p.tr.aggression * 6 - p.tr.calm * 10);
+        if (Gn) A.log('sys', `genre knowledge: <b>${esc(Gn.label)}</b> · ${esc(Gn.notes)}`);
         // every main sequencer gets B/C/D patterns and a song; song mode plays it for designs, the performer switches by hand in a set
         const songOn = p.mode !== 'perform';
         const extra = [];
         acts.filter(a => a.do === 'steps').forEach(a => { a.do = 'pattern'; a.pat = 'A'; if (!A.songForm) extra.push(...songify(a.mod, a, songOn)); });
         acts = acts.concat(extra);
         const reserved = new Set(CORE_IDS);
-        for (let i = 0; i < p.complex; i++) acts = acts.concat(newLayer(p, reserved, songOn || p.songWanted));
+        const nLayers = Gn && !Gn.legacy ? (p.complex >= 3 ? 1 : 0) : p.complex; // a genre build already has its full band
+        for (let i = 0; i < nLayers; i++) acts = acts.concat(newLayer(p, reserved, songOn || p.songWanted));
       }
       // Bring back any built-in module the plan needs that was removed from the rack
       const CORE = { seq1: ['StepSeq', { name: 'Sequencer A', stripe: '#f2b632' }], seq2: ['StepSeq', { name: 'Sequencer B', stripe: '#3e8ef0' }], ent: ['Entropy'], drums: ['Drums'], acid: ['Analog', { model: 'ACID', name: 'Voice 303', stripe: '#f2b632' }], lead: ['Analog', { model: 'JOVE', name: 'Voice Poly', stripe: '#3e8ef0' }], geiger: ['Geiger'], titan: ['Titan'], chip: ['Chip'], bodies: ['Bodies'], slope: ['Slope'], fold: ['Fold'], vcfq: ['VCFQ'] };
@@ -1245,7 +1340,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       keep.add('monitor.IN');
       const stale = E.cables.filter(c => !keep.has(`${c.to.mod}.${c.to.port}`));
       if (stale.length) { A.think(A.stateName, `Clearing ${stale.length} cable${stale.length > 1 ? 's' : ''} this patch does not need.`); for (const c of stale) { if (A.abort) break; await run({ do: 'unpatch', to: `${c.to.mod}.${c.to.port}` }); } }
-      if (bpm) await run(K('clock', 'bpm', clamp((bpm - 60) / 140), `${bpm} BPM suits ${p.genre}`));
+      if (bpm) await run(K('clock', 'bpm', clamp((bpm - 60) / 140), `${bpm} BPM suits ${Genres.get(p.genre)?.label || p.genre}`));
       A.think(A.stateName, plan ? plan.summary || 'Following Claude\'s plan.' : `Building a ${p.genre} patch shaped by the personality.`);
       if (!plan) await run({ do: 'transport', run: true });
       await runAll(acts);
