@@ -398,3 +398,5 @@ canvas.scr.flash{box-shadow:0 0 0 1px #fff8,0 0 14px #fff6}
 .pstep.now{outline:1px solid #fff;outline-offset:-1px}
 .pstep.ai{box-shadow:0 0 0 2px var(--ai)}
 .perfsel{font:10px var(--f-mono);background:#14161b;color:#e9e6dc;border:1px solid #333;width:66px}
+
+.btn.tap{padding:5px 10px;font-size:11px}

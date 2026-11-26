@@ -63,6 +63,7 @@ PANELS = {
     'macros':   (360, 'enamel',  (230, 200, 200), 0.50, 0.30, True),   # faded pink
     'follower': (280, 'brushed', (110, 120, 112), 0.55, 0.40, False),  # steel
     'prime':   (470, 'enamel',    (168, 52, 38),   0.60, 0.45, False),  # brick red
+    'twin':    (330, 'hammer',    (32, 78, 74),    0.60, 0.40, False),  # sea-green hammertone
     'crate':   (420, 'hammer',    (120, 84, 40),   0.65, 0.50, False),  # record-crate brown hammertone
     'comper':  (420, 'enamel',    (40, 84, 72),    0.55, 0.35, False),  # jade green
 }

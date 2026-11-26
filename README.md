@@ -128,3 +128,8 @@ defaulting to the bell, and keeps repeating high drums (cowbell first) low in th
 - **Comper** plays the song's chords with a rhythm (pop, stab, offbeat, reggae skank, Charleston, bossa, gospel, strum, arpeggio, pad, dembow and more) and a voicing (triads, 7ths, 9ths, shell, rootless, quartal, power, sus), with voice leading, a left hand, strum and humanize.
 - The Clock can swing the 8th notes (jazz, blues, boom bap) instead of the 16ths. Two new scales: Mixolydian and Lydian.
 - Every sample is CC0, CC-BY with credit, or synthesized here: see `samples/CREDITS.md`. Rebuild the library with `python3 tools/make_samples.py`.
+
+## Twin stereo filter and tap tempo (daily run, 26 November 2026)
+
+- **Twin** is a stereo dual filter: LP, BP, HP, BAND (a low cut into a low-pass) or NOTCH, at 12 or 24 dB. Spread pulls the left and right cutoffs apart, Motion drifts them in opposite directions, Env opens them as the input gets louder, and Drive warms the input. Resonance stops short of screaming and the cutoff stays out of the shrill top octave. The AI inserts it on leads and basses, modulates it, and adds it when you ask for a "stereo filter" or a "filter sweep".
+- **Tap** next to the tempo readout: tap three or more times in time and both layers' clocks follow.
