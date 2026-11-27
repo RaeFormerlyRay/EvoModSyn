@@ -1,0 +1,9 @@
+{
+  "name": "patchmind",
+  "private": true,
+  "description": "PatchMind modular synth. No runtime dependencies: the app is plain browser JavaScript.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build": "python3 build.py"
+  }
+}

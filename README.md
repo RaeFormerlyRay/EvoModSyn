@@ -139,3 +139,37 @@ defaulting to the bell, and keeps repeating high drums (cowbell first) low in th
 - **Helix** is a West Coast-style complex oscillator voice. A modulator (a ratio from 1/2 to 4, or a free rate) frequency-modulates a sine carrier, and the carrier runs through a wavefolder (Timbre, Symmetry). A 16-step timbre sequence changes the fold and the FM amount on every note, so a plain melody comes out with a different colour on each step. Tone keeps the folds out of the shrill range, and the Pluck, Gate and Drone envelopes make it play like a low-pass-gated voice. Inputs: NOTE, NEW (a new timbre sequence), FM and TIMBRE. Outputs: OUT and MOD.
 - The AI adds Helix as a new layer (more often in electronic styles), turns its folds up or down, changes its ratio, writes new timbre sequences, and modulates Timbre, FM and Symmetry.
 - **Knob lock:** right-click a knob (or focus it and press L) to lock it. The AI, the song engine and the auto-mix leave locked knobs alone. Right-click again to unlock. A knob with a modulation cable still uses right-click to remove the cable.
+## Logic modules, Phase 1 (27 November 2026)
+
+Three modules for musical logic, in their own circuit-board green panels with amber HIGH/LOW lamps (filled + H when high, hollow + L when low):
+
+- **Logic**: combines event streams A, B and an optional C with AND, OR, XOR or ONE-HOT. OUT fires when the function turns on and carries A's notes; INV fires when it turns off, so one module gives NAND, NOR and XNOR too (OR with only A patched is NOT). GATE and NGATE are 0/1 control signals for knobs. A gate symbol and a two-second timing strip show what it is doing.
+- **Compare**: compares a signal A with B, or with the Thresh knob while B is empty. GT, LT and WIN are exact 0/1 signals computed by the audio graph itself; UP and DOWN are triggers when A crosses, with hysteresis, 40 ms late or snapped to the 16th grid.
+- **Edge**: RISE when a gate or note starts, FALL when it ends, BOTH on every change; Width turns those triggers into gates.
+
+How it works (`src/logic.js`, `src/logicmods.js`): logic modules do not react inside their input handlers. Once per scheduler pass, after every other module has ticked, a settle loop processes the logic module holding the earliest input, so fan-in is in true time order, chains add no latency (outputs keep their input's timestamp), and a feedback loop takes a fixed 1 ms gate delay. Between logic modules, gates follow the sender's real level. The signal contract: a trigger is high for 12 ms, a clock tick is a 50% square wave, inputs read high above 0.1 with ±0.05 hysteresis, reset beats data beats clock at the same instant. The full design is in the Phase 0 doc in the project.
+
+The AI has two new moves: a logic rhythm (a sequencer or rhythm generator XOR/AND the beat, played on a drum) and a threshold trigger (an LFO, attractor, follower or contour crossing a level fires grains, a drum or a slope).
+
+Tests: `npm test` (or `node --test tests/*.test.js`). `tests/logic.test.js` checks the core in Node: exhaustive truth tables, timing-diagram fixtures, out-of-order and late events, pass boundaries, feedback, long runs. `tests/browser.test.js` loads the page in headless Chromium (Playwright): Compare and Logic levels are checked sample by sample with OfflineAudioContext at 44.1, 48 and 96 kHz, every module type is built and removed, Toolbox's logic is unchanged, and a live clock → Logic → Edge chain plays in time.
+
+### How the AI uses them
+
+Every design now patches all three, and the song arrangement is heard through them:
+
+- **Logic** cuts in front of whatever played the drums' TRIG (a rhythm generator, Workout, or nothing) and combines it with a sequencer's gates, so a third rhythm plays the drums.
+- **Edge** listens to the bass line, and its note-offs go into Logic's third input. The bass shapes the drum rhythm too.
+- **Compare** watches a slow LFO. Each upward crossing fires something (the rhythm generator's next base rhythm, a Stutter, Grains or Slope), and its GT output is a 0/1 switch on a knob.
+- Each section sets them on its downbeat:
+
+  | Sections | Logic | Compare line |
+  |---|---|---|
+  | Intro, break, outro | AND (sparse) | high (hardly any crossings) |
+  | Verse | ONEHOT | middle |
+  | Build | XOR, then OR halfway | low |
+  | Chorus, drop | OR (busy) | low |
+  | Bridge | ONEHOT, Edge inverted | middle |
+
+- Fills switch Logic's function for one bar. A build's pull bar thins it to AND.
+- Live moves (logic busier, logic sparser, move compare line, edge width) vary them inside a section.
+- Claude's planner is told to do the same in every section it writes.

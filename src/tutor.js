@@ -170,6 +170,9 @@ const Tutor = (() => {
       Fold: 'A Serge-style wavefolder: it folds the waveform back on itself to add bright, complex harmonics.',
       VCFQ: 'A Serge-style VCF-Q filter that can be low-pass, band-pass, high-pass or notch.',
       Mixer: 'A mixing desk: each channel has a level and an effects send, and it all sums to one output.',
+      Logic: 'A logic gate: it watches two (or three) rhythms and fires only when they line up the way its Function says. AND needs both on, OR either one, XOR exactly one of them. INV fires the opposite moments, so one module gives all the classic gates.',
+      Compare: 'A comparator: it watches a moving voltage and says yes or no. GT is on while the voltage is above the threshold, LT while it is below, and UP and DOWN fire a trigger at the moment it crosses, which turns smooth movement into rhythm.',
+      Edge: 'An edge detector: it notices the moment a gate starts (RISE) and the moment it ends (FALL). That lets a note ending trigger a sound, and Width turns short clicks into longer gates.',
     }[type];
     return own || (t.label ? `${t.label}${t.desc ? ': ' + t.desc : ''}.` : type);
   }
