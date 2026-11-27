@@ -133,3 +133,17 @@ defaulting to the bell, and keeps repeating high drums (cowbell first) low in th
 
 - **Twin** is a stereo dual filter: LP, BP, HP, BAND (a low cut into a low-pass) or NOTCH, at 12 or 24 dB. Spread pulls the left and right cutoffs apart, Motion drifts them in opposite directions, Env opens them as the input gets louder, and Drive warms the input. Resonance stops short of screaming and the cutoff stays out of the shrill top octave. The AI inserts it on leads and basses, modulates it, and adds it when you ask for a "stereo filter" or a "filter sweep".
 - **Tap** next to the tempo readout: tap three or more times in time and both layers' clocks follow.
+
+## Logic modules, Phase 1 (27 November 2026)
+
+Three modules for musical logic, in their own circuit-board green panels with amber HIGH/LOW lamps (filled + H when high, hollow + L when low):
+
+- **Logic**: combines event streams A, B and an optional C with AND, OR, XOR or ONE-HOT. OUT fires when the function turns on and carries A's notes; INV fires when it turns off, so one module gives NAND, NOR and XNOR too (OR with only A patched is NOT). GATE and NGATE are 0/1 control signals for knobs. A gate symbol and a two-second timing strip show what it is doing.
+- **Compare**: compares a signal A with B, or with the Thresh knob while B is empty. GT, LT and WIN are exact 0/1 signals computed by the audio graph itself; UP and DOWN are triggers when A crosses, with hysteresis, 40 ms late or snapped to the 16th grid.
+- **Edge**: RISE when a gate or note starts, FALL when it ends, BOTH on every change; Width turns those triggers into gates.
+
+How it works (`src/logic.js`, `src/logicmods.js`): logic modules do not react inside their input handlers. Once per scheduler pass, after every other module has ticked, a settle loop processes the logic module holding the earliest input, so fan-in is in true time order, chains add no latency (outputs keep their input's timestamp), and a feedback loop takes a fixed 1 ms gate delay. Between logic modules, gates follow the sender's real level. The signal contract: a trigger is high for 12 ms, a clock tick is a 50% square wave, inputs read high above 0.1 with ±0.05 hysteresis, reset beats data beats clock at the same instant. The full design is in the Phase 0 doc in the project.
+
+The AI has two new moves: a logic rhythm (a sequencer or rhythm generator XOR/AND the beat, played on a drum) and a threshold trigger (an LFO, attractor, follower or contour crossing a level fires grains, a drum or a slope).
+
+Tests: `npm test` (or `node --test tests/*.test.js`). `tests/logic.test.js` checks the core in Node: exhaustive truth tables, timing-diagram fixtures, out-of-order and late events, pass boundaries, feedback, long runs. `tests/browser.test.js` loads the page in headless Chromium (Playwright): Compare and Logic levels are checked sample by sample with OfflineAudioContext at 44.1, 48 and 96 kHz, every module type is built and removed, Toolbox's logic is unchanged, and a live clock → Logic → Edge chain plays in time.

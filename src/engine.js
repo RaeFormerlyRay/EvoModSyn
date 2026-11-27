@@ -5,7 +5,7 @@ const Engine = (() => {
   const ctx = new AC({ latencyHint: 'interactive' });
   const E = {
     ctx, bpm: 126, swing: 0, running: false,
-    noise: null, uiq: [], listeners: { change: [] }, step: 0, nextTime: 0
+    noise: null, uiq: [], listeners: { change: [] }, step: 0, nextTime: 0, post: []
   };
   // ---------- Layers ----------
   // Two independent modular systems (Layer A and Layer B), each with its own modules, cables, chords and master
@@ -239,6 +239,8 @@ const Engine = (() => {
       if (!Ly.order.length) continue;
       E.within(Ly.i, () => { for (const id of Ly.order) { const m = Ly.mods[id]; if (!m) continue; if (m.tick !== Module.prototype.tick) m.tick(now, horizon); } });
     }
+    // after every module has ticked: hooks such as the logic modules' settle loop (logicmods.js)
+    for (const f of E.post) { try { f(now, horizon); } catch (e) { console.error(e); } }
   }
   // setInterval keeps running when the tab is hidden (throttled), rAF does not
   setInterval(() => { pass(); modPass(); }, 25);

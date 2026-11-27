@@ -427,3 +427,16 @@ canvas.scr.flash{box-shadow:0 0 0 1px #fff8,0 0 14px #fff6}
 body.tutor #tutorskip{border-color:#2b6b73;color:var(--ai)}
 @media (prefers-reduced-motion: reduce){#tutorbubble{transition:none}#tutorbubble .tb-skip{animation:none}}
 .btn.tap{padding:5px 10px;font-size:11px}
+
+/* logic family: HIGH/LOW lamps (filled + H, hollow + L), gate symbol */
+.lglamps .ledcell{gap:3px}
+.lgled{display:inline-block;width:8px;height:8px;border-radius:50%;box-shadow:inset 0 0 0 1.5px #ffb03b88;background:transparent;flex:none}
+.lgled.on{background:#ffb03b;box-shadow:0 0 8px #ffb03b,inset 0 0 0 1.5px #ffd27a}
+.lghl{font:9px var(--f-mono);color:#ffffff66;width:7px}
+.lgtop{display:flex;gap:6px;align-items:center}
+.lgtop .lcd{flex:1;font-size:10px}
+.lgsym{background:#0b1210;border:1px solid #000;border-radius:2px;box-shadow:0 0 0 1px #2c323b;padding:2px 4px;line-height:0}
+.lgsym .g,.lgsym .x{stroke:#ffb03b;stroke-width:2;fill:#ffb03b1a}
+.lgsym .x{fill:none}
+.lgsym .b{fill:none;stroke:#ffb03b;stroke-width:1.6}
+.lgsym .t{fill:#ffb03b;font:9px var(--f-mono)}

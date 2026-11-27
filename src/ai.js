@@ -975,6 +975,11 @@ const AI = (() => {
     return [v, src?.kind === 'StepSeq' ? `${c.from.mod}.GATE` : src?.kind === 'Marbles' ? `${c.from.mod}.T2` : 'clock.BEAT'];
   });
   const freeCV = () => ['acid.CUT', 'lead.CUT', 'titan.CUT', 'vcfq.CV', 'fold.FOLD', 'grains.POS', 'grains.DENS'].filter(d => freeIn(d) && (routed(d.split('.')[0]) || d.startsWith('fold') && E.findCable('fold', 'IN') || d.startsWith('grains')));
+  // trigger streams a logic gate can combine with the beat, and moving voltages a comparator can watch
+  const logicSources = () => [...activeSeqs().map(id => id + '.GATE'), ...['work.O3', 'marbles.T1', 'prime.T1', 'ent.TRIG'].filter(x => E.mods[x.split('.')[0]] && E.cablesFrom(x.split('.')[0]).length)];
+  const CV_OUT = { Orbit: 'O1', Attractor: 'X', Swarm: 'O1', Follower: 'ENV', Contour: 'OUT1' };
+  const cvSources = () => E.order.filter(id => CV_OUT[E.mods[id].kind]).map(id => `${id}.${CV_OUT[E.mods[id].kind]}`);
+  const cmpTargets = () => [...(E.mods.grains ? ['grains.TRIG'] : []), ...(drumsOn() && freeIn('drums.TRIG') ? ['drums.TRIG'] : []), ...(E.mods.slope && freeIn('slope.TRIG') ? ['slope.TRIG'] : [])];
   const grainSources = () => ['bodies', 'lead', 'acid', 'chip', 'titan'].filter(routed);
   const idleVoices = () => ['bodies', 'chip', 'lead', 'reel'].filter(v => E.mods[v] && !E.findCable(v, 'NOTE'));
   // voices played by a sequencer and heard through a mixer channel: candidates for the low-pass gate
@@ -1108,6 +1113,26 @@ const AI = (() => {
     'scroll rhythm': { fx: { novelty: 0.9, motion: 0.5 }, ok: () => E.mods.prime && E.cablesFrom('prime').length, make: () => [nudge('prime', 'prime', (rnd() < 0.5 ? -1 : 1) * (0.06 + rnd() * 0.1), 'scroll to another base rhythm', 1200)] },
     'reshape rhythm': { fx: { novelty: 0.6, motion: 0.6, energy: 0.1 }, ok: () => E.mods.prime && E.cablesFrom('prime').length, make: () => { const f = 'f' + (1 + Math.floor(rnd() * 4)); return [nudge('prime', f, (rnd() - 0.5) * 0.4, 'reshape one percussion line', 1500)]; } },
     'thin the rhythm': { fx: { energy: -0.4, motion: -0.2 }, ok: () => E.mods.prime && E.cablesFrom('prime').length && E.mods.prime.params.prob.n > 0.5, make: () => [nudge('prime', 'prob', -0.2, 'fewer extra hits, more space')] },
+    // ----- logic modules: combine rhythms, turn moving voltages into hits -----
+    'add logic rhythm': { fx: { novelty: 1.2, motion: 0.6, energy: 0.3 }, ok: () => canAdd() && !E.mods.logic && drumsOn() && freeIn('drums.TRIG') && logicSources().length, make: () => {
+      A.lastAdd = performance.now();
+      const a = pick(logicSources()), fn = pick(['XOR', 'XOR', 'AND', 'ONEHOT']), inst = pick(['RS', 'LT', 'CP', 'SD', 'HT']);
+      const what = { XOR: 'only where they disagree', AND: 'only where they agree', ONEHOT: 'only where exactly one is on' }[fn];
+      return [{ do: 'say', text: `Building a new drum part with logic: ${a.split('.')[0]} against the beat, ${what}.` },
+        { do: 'add', type: 'Logic', id: 'logic', why: 'a logic gate that makes a third rhythm out of two' },
+        P(a, 'logic.A', 'first rhythm'), P('clock.BEAT', 'logic.B', 'the beat as a square wave'), K('logic', 'fn', fn, `${fn}: ${what}`),
+        K('drums', 'trigv', inst), P('logic.OUT', 'drums.TRIG', 'the combined rhythm plays a drum')];
+    } },
+    'add threshold trigger': { fx: { novelty: 1.1, chaos: 0.6, motion: 0.7 }, ok: () => canAdd() && !E.mods.cmp && cvSources().length && cmpTargets().length, make: () => {
+      A.lastAdd = performance.now();
+      const src = pick(cvSources()), to = pick(cmpTargets()), lvl = 0.2 + rnd() * 0.3, acts = [];
+      acts.push({ do: 'say', text: `Turning ${src.split('.')[0]}'s movement into hits: every time it rises past ${lvl.toFixed(2)}, ${to.split('.')[0]} fires on the next 16th.` },
+        { do: 'add', type: 'Compare', id: 'cmp', why: 'a comparator turns a moving voltage into triggers' },
+        P(src, 'cmp.A', 'the voltage to watch'), K('cmp', 'thr', (lvl + 1) / 2, 'the level it has to cross'), K('cmp', 'hyst', 0.2, 'hysteresis so it does not chatter'), K('cmp', 'snap', '1/16', 'land the hits on the grid'));
+      if (to === 'drums.TRIG') acts.push(K('drums', 'trigv', pick(['LT', 'HT', 'RS', 'CP'])));
+      acts.push(P('cmp.UP', to, 'each crossing fires it'));
+      return acts;
+    } },
     'add tape keyboard': { fx: { novelty: 1.2, energy: 0.1, bright: -0.1 }, ok: () => canAdd() && !E.mods.reel, make: () => { A.lastAdd = performance.now(); return L.reelLayer(A.prof); } },
     'add low-pass gate': { fx: { novelty: 1.1, motion: 0.5, energy: -0.1 }, ok: () => canAdd() && !E.mods.lpg && lpgTargets().length, make: () => { A.lastAdd = performance.now(); const t = lpgTargets(); return L.lpgOn(t.includes('reel') ? 'reel' : pick(t)); } },
     'change tape': { fx: { novelty: 0.9 }, ok: () => routed('reel'), make: () => [K('reel', 'tape', pick(Object.keys(Reel.TAPES).filter(t => t !== E.mods.reel.params.tape.choice)), 'swap the tape for another instrument')] },
@@ -1266,7 +1291,7 @@ ACTIONS (JSON objects):
 {"do":"fire","mod":"stut2","type":"REPEAT|REVERSE|STOP|SPIN"}  (a glitch right now)
 {"do":"say","text":"short first-person narration of your intent"}
 
-ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}${t.desc ? ': ' + t.desc : ''}, ids like ${t.prefix}3)`).join('; ')}. CV outputs swing about -1..1 (Contour 0..1); a voice CUT input moves the cutoff 2 octaves per unit. Modulation modules (Contour, Swarm, Toolbox) make complex patches: patch their outputs into CUT, FOLD, CV, POS and similar inputs. Workout and Marbles outputs are events (ev) for TRIG/CLK/NOTE inputs. Effects (Halls, Echoes, Ensemble, Phaser, Heat, Bode, Sympathy, Vowel, Pump, Stutter, Prism, Cassette, Horizon, Twin) go in with "insert". Modulation sources (Orbit, Performer, Attractor, Macros, Follower, Swarm, Contour) should be used OFTEN: drop their outputs onto synth, filter and effect knobs with "mod", subtle depths (0.05-0.2) for verses, dramatic ones (0.3-0.6) for drops and choruses. Do not use the cowbell (CB) or bells more than rarely, and keep high repeating sounds low in the mix. Vary the instruments: do not default to the Bodies bell. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
+ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}${t.desc ? ': ' + t.desc : ''}, ids like ${t.prefix}3)`).join('; ')}. CV outputs swing about -1..1 (Contour 0..1); a voice CUT input moves the cutoff 2 octaves per unit. Modulation modules (Contour, Swarm, Toolbox) make complex patches: patch their outputs into CUT, FOLD, CV, POS and similar inputs. Workout and Marbles outputs are events (ev) for TRIG/CLK/NOTE inputs. Logic modules: Logic combines two or three event streams (AND, OR, XOR, ONEHOT; OUT on, INV off) and is the way to merge two trigger sources into one input or to make a new rhythm out of two; Edge gives RISE/FALL/BOTH triggers from gates and notes; Compare turns a CV (an LFO, attractor or Follower ENV) into UP/DOWN triggers and 0/1 GT/LT/WIN signals. Their GATE outputs are 0/1 control signals you can drop on knobs. Effects (Halls, Echoes, Ensemble, Phaser, Heat, Bode, Sympathy, Vowel, Pump, Stutter, Prism, Cassette, Horizon, Twin) go in with "insert". Modulation sources (Orbit, Performer, Attractor, Macros, Follower, Swarm, Contour) should be used OFTEN: drop their outputs onto synth, filter and effect knobs with "mod", subtle depths (0.05-0.2) for verses, dramatic ones (0.3-0.6) for drops and choruses. Do not use the cowbell (CB) or bells more than rarely, and keep high repeating sounds low in the mix. Vary the instruments: do not default to the Bodies bell. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
 
 Reply with JSON only:
 {"summary":"one sentence","targets":{"energy":0-1,"brightness":0-1},
