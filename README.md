@@ -134,6 +134,11 @@ defaulting to the bell, and keeps repeating high drums (cowbell first) low in th
 - **Twin** is a stereo dual filter: LP, BP, HP, BAND (a low cut into a low-pass) or NOTCH, at 12 or 24 dB. Spread pulls the left and right cutoffs apart, Motion drifts them in opposite directions, Env opens them as the input gets louder, and Drive warms the input. Resonance stops short of screaming and the cutoff stays out of the shrill top octave. The AI inserts it on leads and basses, modulates it, and adds it when you ask for a "stereo filter" or a "filter sweep".
 - **Tap** next to the tempo readout: tap three or more times in time and both layers' clocks follow.
 
+## Helix complex oscillator and knob lock (daily run, 27 November 2026)
+
+- **Helix** is a West Coast-style complex oscillator voice. A modulator (a ratio from 1/2 to 4, or a free rate) frequency-modulates a sine carrier, and the carrier runs through a wavefolder (Timbre, Symmetry). A 16-step timbre sequence changes the fold and the FM amount on every note, so a plain melody comes out with a different colour on each step. Tone keeps the folds out of the shrill range, and the Pluck, Gate and Drone envelopes make it play like a low-pass-gated voice. Inputs: NOTE, NEW (a new timbre sequence), FM and TIMBRE. Outputs: OUT and MOD.
+- The AI adds Helix as a new layer (more often in electronic styles), turns its folds up or down, changes its ratio, writes new timbre sequences, and modulates Timbre, FM and Symmetry.
+- **Knob lock:** right-click a knob (or focus it and press L) to lock it. The AI, the song engine and the auto-mix leave locked knobs alone. Right-click again to unlock. A knob with a modulation cable still uses right-click to remove the cable.
 ## Logic modules, Phase 1 (27 November 2026)
 
 Three modules for musical logic, in their own circuit-board green panels with amber HIGH/LOW lamps (filled + H when high, hollow + L when low):

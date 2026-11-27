@@ -110,6 +110,7 @@ const AI = (() => {
         case 'knob': {
           const m = E.mods[a.mod], p = m?.params[a.key];
           if (!p) { A.log('err', `skipped unknown knob ${esc(a.mod)}.${esc(a.key)}`); break; }
+          if (p.locked) { A.log('sys', `left ${esc(m.name)} ${esc(p.label)} alone: you locked it`); break; }
           if (BANNED(m, a.key, a.to)) { a = { ...a, to: m.kind === 'Chip' ? 'P25' : 'MARIMBA' }; A.log('sys', `no bells: ${esc(m.name)} gets ${a.to} instead`); }
           const n = normFor(p, a.to); if (n == null) { A.log('err', `skipped ${esc(a.mod)}.${esc(a.key)}: bad value`); break; }
           if (Math.abs(n - p.n) < 0.004) break;
@@ -717,7 +718,7 @@ const AI = (() => {
       // a voice from a spec like "Crate:EPIANO" for a role
       const voice = (spec, role) => {
         const [type, set] = spec.split(':'), a = [];
-        const want = { bass: { Crate: 'crate', Analog: 'acid', Titan: 'titan', Reel: 'reel' }, chords: { Crate: 'keys', Reel: 'reel', Analog: 'lead' }, lead: { Crate: 'horn', Analog: 'lead', Chip: 'chip', Bodies: 'bodies', Reel: 'reel2' } }[role][type] || type.toLowerCase();
+        const want = { bass: { Crate: 'crate', Analog: 'acid', Titan: 'titan', Reel: 'reel' }, chords: { Crate: 'keys', Reel: 'reel', Analog: 'lead' }, lead: { Crate: 'horn', Analog: 'lead', Chip: 'chip', Bodies: 'bodies', Reel: 'reel2', Helix: 'helix' } }[role][type] || type.toLowerCase();
         let id = want; if (taken.has(id)) id = E.newId(id, new Set([...taken, ...CORE_IDS])); taken.add(id);
         if (type === 'Crate') {
           const fam = Samples.INFO[set]?.family;
@@ -735,6 +736,7 @@ const AI = (() => {
             K(id, 'cut', growl ? 0.38 : 0.3), K(id, 'res', clamp(0.3 + ag * 0.35)), K(id, 'wrate', growl ? pick(['1/8', '1/8T', '1/4']) : '1/2'), K(id, 'wcut', growl ? 0.75 : 0.3), K(id, 'wpos', growl ? 0.65 : 0.2),
             K(id, 'drive', clamp(0.35 + ag * 0.55), growl ? 'drive it hard for the growl' : 'warm saturation on the reese'), K(id, 'level', 0.65));
         } else if (type === 'Reel') { a.push({ do: 'add', type: 'Reel', id }, K(id, 'tape', set), K(id, 'sus', 0.8, 'let the tape notes ring'), K(id, 'chord', 'OFF'), K(id, 'wow', 0.15), K(id, 'oct', role === 'bass' ? '-1' : '0')); }
+        else if (type === 'Helix') { a.push({ do: 'add', type: 'Helix', id }, ...helixPatch(id, p, role === 'bass')); }
         else if (type === 'Chip') a.push(K(id, 'wave', pick(['P25', 'TRI'])), K(id, 'arp', 'OFF'), K(id, 'oct', 0), K(id, 'crush', 4));
         else if (type === 'Bodies') a.push(K(id, 'model', set || bodyModel()), K(id, 'decay', 0.5), K(id, 'bright', 0.45));
         return { id, acts: a, type, set };
@@ -790,7 +792,7 @@ const AI = (() => {
       const ag = agg(p), ch = cha(p), calm = p.tr.calm, g = p.genre, acts = [], room = 30 - E.order.length;
       if (room < 2) return acts;
       const bass = ['titan', 'acid'].find(routed) || E.order.find(id => E.mods[id].kind === 'Titan' && routed(id));
-      const leads = E.order.filter(id => routed(id) && ['Analog', 'Chip', 'Bodies', 'Reel', 'LPG', 'Sampler'].includes(E.mods[id].kind) && id !== bass && !(E.mods[id].kind === 'Sampler' && ['bass', 'breaks', 'texture', 'fx'].includes(Samples.INFO[E.mods[id].params.bank.choice]?.family)));
+      const leads = E.order.filter(id => routed(id) && ['Analog', 'Chip', 'Bodies', 'Reel', 'LPG', 'Sampler', 'Helix'].includes(E.mods[id].kind) && id !== bass && !(E.mods[id].kind === 'Sampler' && ['bass', 'breaks', 'texture', 'fx'].includes(Samples.INFO[E.mods[id].params.bank.choice]?.family)));
       const lead = leads.length ? pick(leads) : null, drums = routed('drums') ? 'drums' : null;
       const has = t => E.order.some(id => E.mods[id].kind === t && E.cables.some(c => c.from.mod === id));
       const I = (into, type, set, why, port) => ({ do: 'insert', into, port, type, set, why });
@@ -941,8 +943,8 @@ const AI = (() => {
   const CUTKEY = { Analog: 'cutoff', Titan: 'cut', VCFQ: 'freq' };
   const voiceCut = () => E.order.filter(id => CUTKEY[E.mods[id].kind] && routed(id)).map(id => [id, CUTKEY[E.mods[id].kind]]);
   const activeSeqs = () => E.order.filter(id => kindIs(id, 'StepSeq') && E.cablesFrom(id, 'NOTE').length);
-  const VOICE_KINDS = ['Analog', 'Titan', 'Chip', 'Bodies', 'VCFQ', 'Reel'];
-  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq', 'contour', 'swarm', 'work', 'grains', 'marbles', 'tools', 'reel', 'lpg', 'crate', 'keys', 'comp', 'horn', 'brk', 'tex', 'tex2', 'fxs', 'reel2'];
+  const VOICE_KINDS = ['Analog', 'Titan', 'Chip', 'Bodies', 'VCFQ', 'Reel', 'Helix'];
+  const CORE_IDS = ['seq1', 'seq2', 'ent', 'drums', 'acid', 'lead', 'geiger', 'titan', 'chip', 'bodies', 'slope', 'fold', 'vcfq', 'contour', 'swarm', 'work', 'grains', 'marbles', 'tools', 'reel', 'lpg', 'crate', 'keys', 'comp', 'horn', 'brk', 'tex', 'tex2', 'fxs', 'reel2', 'helix'];
 
   // ----- pattern variations and songs -----
   // B: a development of A, C: a stripped-back version, D: a fill. Each picks one of several ways to do it.
@@ -991,11 +993,11 @@ const AI = (() => {
   }
   const LAYERS = {
     acid: ['Analog:LADDER', 'Reel', 'Chip', 'Analog:SCREAM', 'Titan', 'Bodies'], dubstep: ['Chip', 'Analog:SCREAM', 'Reel', 'Titan', 'Analog:ODYSSEY'], dnb: ['Analog:JOVE', 'Reel', 'Chip', 'Titan', 'Bodies'],
-    ambient: ['Reel', 'Analog:JOVE', 'Bodies', 'Analog:SEM', 'Reel'], chip: ['Chip', 'Analog:ODYSSEY', 'Reel'], noise: ['Analog:SCREAM', 'Titan', 'Reel', 'Bodies', 'Chip'],
-    experimental: ['Bodies', 'Chip', 'Analog:PROPHECY', 'Reel', 'Titan'], default: ['Analog:PROPHECY', 'Bodies', 'Chip', 'Analog:SEM', 'Reel', 'Titan', 'Analog:ODYSSEY']
+    ambient: ['Reel', 'Analog:JOVE', 'Bodies', 'Analog:SEM', 'Reel', 'Helix'], chip: ['Chip', 'Analog:ODYSSEY', 'Reel'], noise: ['Analog:SCREAM', 'Titan', 'Reel', 'Bodies', 'Chip'],
+    experimental: ['Bodies', 'Chip', 'Analog:PROPHECY', 'Reel', 'Titan', 'Helix'], default: ['Analog:PROPHECY', 'Bodies', 'Chip', 'Analog:SEM', 'Reel', 'Titan', 'Analog:ODYSSEY', 'Helix']
   };
   // ----- variety: remember which instruments the AI has leaned on lately and favour the ones it has not -----
-  const NEWER = { Reel: 1.8, Titan: 1.3, Chip: 1.1, Bodies: 0.45 }; // Bodies is picked less on purpose (and never as a bell)
+  const NEWER = { Helix: 1.4, Reel: 1.8, Titan: 1.3, Chip: 1.1, Bodies: 0.45 }; // Bodies is picked less on purpose (and never as a bell)
   let usage = {}; try { usage = JSON.parse(localStorage.getItem('patchmind.usage') || '{}'); } catch (e) { /* no storage */ }
   const fresh = list => wpick(list.map(k => [k, (NEWER[k.split(':')[0]] ?? 1) / (1 + (usage[k] || 0) * 0.9)]));
   const used = k => { for (const x in usage) usage[x] *= 0.93; usage[k] = (usage[k] || 0) + 1; try { localStorage.setItem('patchmind.usage', JSON.stringify(usage)); } catch (e) { /* no storage */ } };
@@ -1005,7 +1007,9 @@ const AI = (() => {
   // A brand-new layer: add a sequencer and a voice module, patch them, write patterns and a song
   function newLayer(p, reserved, songOn) {
     const Gn = Genres.get(p.genre), gpal = Gn && !Gn.legacy ? [...[].concat(Gn.lead?.v || []), ...[].concat(Gn.chords?.v || [])].filter(v => !/^Titan|^Reel/.test(v)) : null;
-    const spec = fresh(gpal?.length ? gpal : LAYERS[p.genre] || LAYERS.default); let [type, model] = spec.split(':'); used(spec);
+    const pool = gpal?.length ? [...gpal] : [...(LAYERS[p.genre] || LAYERS.default)];
+    if (gpal?.length && Gn?.fam === 'edm' && !pool.includes('Helix')) pool.push('Helix'); // the complex oscillator suits electronic styles
+    const spec = fresh(pool); let [type, model] = spec.split(':'); used(spec);
     if (type === 'Crate') type = 'Sampler';
     const seq = E.newId('seq', reserved); reserved.add(seq);
     const vid = E.newId(type === 'Analog' ? 'voice' : Mods.TYPES[type].prefix, reserved); reserved.add(vid);
@@ -1023,10 +1027,21 @@ const AI = (() => {
     if (type === 'Bodies') acts.push(K(vid, 'model', bodyModel()));
     if (type === 'Chip') acts.push(K(vid, 'arp', pick(['MAJ', 'MIN', 'OCT', 'OFF'])));
     if (type === 'Reel') acts.push(K(vid, 'tape', pick(['STRINGS', 'CHOIR', 'FLUTE', 'CELLO'])), K(vid, 'sus', 0.55, 'let the tape notes ring'), K(seq, 'gate', 0.95));
+    if (type === 'Helix') acts.push(...helixPatch(vid, p, low));
     if (type === 'Sampler') acts.push(K(vid, 'bank', model, 'load the ' + (Samples.INFO[model]?.label || model).toLowerCase()), K(vid, 'rel', 0.5));
     return acts;
   }
   A.newLayer = newLayer;
+  // a West Coast patch for the complex oscillator: plucked folds for melodies, a gentler gate for basses
+  function helixPatch(id, p, low) {
+    const ag = p.tr?.aggression ?? 0.4, calm = p.tr?.calm ?? 0.4, ch = p.tr?.chaos ?? 0.3;
+    return [K(id, 'ratio', low ? pick(['1', '1/2', '2']) : pick(['2', '3/2', '3', '1', '7/2'])), K(id, 'mwave', low ? 'SINE' : pick(['SINE', 'SINE', 'TRI'])),
+      K(id, 'fm', clamp((low ? 0.12 : 0.18) + ag * 0.2), 'FM for a woody, inharmonic edge'), K(id, 'timbre', clamp((low ? 0.12 : 0.2) + ag * 0.2), 'a little wavefolding'),
+      K(id, 'seqamt', clamp(0.25 + ch * 0.4), 'the timbre sequence colours every note differently'), K(id, 'seqlen', pick(['4', '8', '8', '16'])),
+      K(id, 'env', low ? 'GATE' : calm > 0.6 ? 'GATE' : 'PLUCK'), K(id, 'decay', low ? 0.3 : clamp(0.3 + calm * 0.3)), K(id, 'tone', low ? 0.35 : 0.5, 'tone kept below the shrill range'),
+      K(id, 'oct', low ? '-1' : '0'), K(id, 'level', 0.6)];
+  }
+  A.helixPatch = helixPatch;
   const nudge = (mod, key, d, why, ms) => { const p = E.mods[mod].params[key]; return K(mod, key, clamp(p.n + d), why, ms); };
   const drumsOn = () => routed('drums');
   const canAdd = () => E.order.length <= 26 && performance.now() - (A.lastAdd || 0) > 40000;
@@ -1050,7 +1065,7 @@ const AI = (() => {
   const MODT = {
     Analog: [['cutoff', 0.12, 0.3], ['res', 0.1, 0.25], ['detune', 0.15, 0.4], ['drive', 0.12, 0.35]],
     Titan: [['p1', 0.18, 0.45], ['p2', 0.18, 0.45], ['cut', 0.12, 0.3], ['drive', 0.12, 0.3], ['uni', 0.15, 0.4]],
-    Chip: [['vib', 0.15, 0.4]], Reel: [['tone', 0.12, 0.25], ['wow', 0.2, 0.4]], VCFQ: [['freq', 0.12, 0.3]], Grains: [['pos', 0.2, 0.5], ['size', 0.15, 0.35]],
+    Chip: [['vib', 0.15, 0.4]], Helix: [['timbre', 0.12, 0.3], ['fm', 0.1, 0.25], ['sym', 0.15, 0.35]], Reel: [['tone', 0.12, 0.25], ['wow', 0.2, 0.4]], VCFQ: [['freq', 0.12, 0.3]], Grains: [['pos', 0.2, 0.5], ['size', 0.15, 0.35]],
     Heat: [['drive', 0.15, 0.4], ['bias', 0.2, 0.5], ['rate', -0.1, -0.35]], Bode: [['shift', 0.015, 0.06], ['fb', 0.15, 0.35]], Vowel: [['vowel', 0.25, 0.6], ['shift', 0.15, 0.35]],
     Echoes: [['fb', 0.12, 0.3], ['time', 0.02, 0.06], ['tone', 0.15, 0.3]], Halls: [['mix', 0.12, 0.3], ['shim', 0.15, 0.35], ['tone', 0.12, 0.25]],
     Ensemble: [['depth', 0.2, 0.4], ['rate', 0.15, 0.35]], Phaser: [['center', 0.2, 0.45], ['regen', 0.15, 0.3]], Prism: [['fb', 0.15, 0.3], ['mix', 0.15, 0.35]],
@@ -1060,7 +1075,7 @@ const AI = (() => {
   const heardBy = id => routed(id) || E.cables.some(c => c.from.mod === id && E.mods[c.to.mod]?.kind === 'Monitor');
   function modTargets() {
     const out = [];
-    for (const id of E.order) { const m = E.mods[id], list = MODT[m.kind]; if (!list || !heardBy(id)) continue; for (const [k, a, b] of list) if (m.params[k]?.canMod && !E.findCable(id, '@' + k)) out.push([id, k, a, b]); }
+    for (const id of E.order) { const m = E.mods[id], list = MODT[m.kind]; if (!list || !heardBy(id)) continue; for (const [k, a, b] of list) if (m.params[k]?.canMod && !m.params[k].locked && !E.findCable(id, '@' + k)) out.push([id, k, a, b]); }
     return out;
   }
   // keep a modulated brightness knob from swinging into shrill territory
@@ -1075,7 +1090,7 @@ const AI = (() => {
   function fxWords(t) {
     const map = [[/reverb|hall|room|space|cathedral/i, 'Halls'], [/delay|echo/i, 'Echoes'], [/chorus|ensemble|flang|dimension/i, 'Ensemble'], [/phaser|phasing/i, 'Phaser'], [/distort|drive|fuzz|crush|bitcrush|saturat|fold/i, 'Heat'], [/frequency shift|bode|ring mod|barber/i, 'Bode'], [/resonat|sympathetic/i, 'Sympathy'], [/vowel|formant|talk|yoi/i, 'Vowel'], [/compress|sidechain|pump|ott|squash|glue/i, 'Pump'], [/stutter|glitch|beat repeat|tape stop|reverse/i, 'Stutter'], [/harmoni|pitch shift|shimmer|octaver/i, 'Prism'], [/cassette|lo-?fi|tape wobble|vhs/i, 'Cassette'], [/feedback network|chaos verb|black hole|drone/i, 'Horizon'], [/stereo filter|filter sweep|wah|twin filter/i, 'Twin']];
     const want = map.filter(([re]) => re.test(t)).map(([, ty]) => ty); if (!want.length) return [];
-    const bass = ['titan', 'acid'].find(routed), lead = E.order.find(id => routed(id) && ['Analog', 'Chip', 'Bodies', 'Reel'].includes(E.mods[id].kind) && id !== bass) || bass;
+    const bass = ['titan', 'acid'].find(routed), lead = E.order.find(id => routed(id) && ['Analog', 'Chip', 'Bodies', 'Reel', 'Helix'].includes(E.mods[id].kind) && id !== bass) || bass;
     const onDrums = { Pump: 1, Stutter: 1 }, onBass = { Heat: 1, Vowel: 1 };
     return want.map(ty => ({ do: 'insert', type: ty, into: onDrums[ty] && routed('drums') ? 'drums' : onBass[ty] && bass ? bass : lead || 'drums', why: 'you asked for it' })).filter(a => E.mods[a.into]);
   }
@@ -1199,6 +1214,17 @@ const AI = (() => {
     'logic sparser': { fx: { energy: -0.4, motion: -0.2, novelty: 0.5 }, ok: () => logicMods('Logic').some(id => !['AND', 'ONEHOT'].includes(E.mods[id].params.fn.choice)), make: () => { const id = pick(logicMods('Logic').filter(id => !['AND', 'ONEHOT'].includes(E.mods[id].params.fn.choice))), fn = pick(['AND', 'ONEHOT']); return [K(id, 'fn', fn, fn === 'AND' ? 'AND: only where they agree' : 'ONEHOT: one at a time')]; } },
     'move compare line': { fx: { novelty: 0.6, motion: 0.6, chaos: 0.3 }, ok: () => logicMods('Compare').length, make: () => { const id = pick(logicMods('Compare')), p = E.mods[id].params.thr, d = (rnd() < 0.5 ? -1 : 1) * (0.06 + rnd() * 0.1); return [K(id, 'thr', clamp(p.n + d, 0.3, 0.97), d < 0 ? 'lower the line: the switch stays on longer' : 'raise the line: fewer, later hits', 1500)]; } },
     'edge width': { fx: { novelty: 0.5, motion: 0.4, energy: 0.1 }, ok: () => logicMods('Edge').length, make: () => { const id = pick(logicMods('Edge')), w = E.mods[id].params.width.n; return [K(id, 'width', w > 0.2 ? 0 : 0.3 + rnd() * 0.3, w > 0.2 ? 'back to short triggers' : 'stretch the edges into gates')]; } },
+    'add complex oscillator': { fx: { novelty: 1.3, motion: 0.4, bright: 0.1 }, ok: () => canAdd() && !E.mods.helix, make: () => {
+      A.lastAdd = performance.now(); const seq = E.newId('seq', new Set(CORE_IDS)), base = melody(A.prof);
+      return [{ do: 'say', text: 'Adding a West Coast complex oscillator: FM into a wavefolder, with a timbre sequence that colours every note.' },
+        { do: 'add', type: 'StepSeq', id: seq, why: 'a sequencer for the complex oscillator' }, { do: 'add', type: 'Helix', id: 'helix', why: 'a complex oscillator voice' },
+        P('clock.CLK', `${seq}.CLK`), P(`${seq}.NOTE`, 'helix.NOTE'), K(seq, 'scale', keyScale(A.prof)), K(seq, 'root', keyRoot(A.prof)), K(seq, 'oct', 3), K(seq, 'gate', 0.5), K(seq, 'len', base.len),
+        { do: 'pattern', mod: seq, pat: 'A', ...base, why: 'a melody for the folds to colour' }, ...helixPatch('helix', A.prof, false), { do: 'route', mod: 'helix', level: 0.42, send: 0.35 }];
+    } },
+    'helix new colours': { fx: { novelty: 0.9, chaos: 0.3 }, ok: () => routed('helix'), make: () => { E.mods.helix.newSeq(); return [{ do: 'say', text: 'A new timbre sequence on the complex oscillator: every note gets a new colour.' }, nudge('helix', 'seqamt', (rnd() - 0.4) * 0.2)]; } },
+    'helix fold': { fx: { bright: 0.3, energy: 0.3 }, ok: () => routed('helix') && E.mods.helix.params.timbre.n < 0.7, make: () => [nudge('helix', 'timbre', 0.12, 'fold the wave further', 1500)] },
+    'helix soften': { fx: { bright: -0.4, energy: -0.2 }, ok: () => routed('helix') && E.mods.helix.params.timbre.n > 0.15, make: () => [nudge('helix', 'timbre', -0.12, 'fewer folds, rounder tone', 1500), nudge('helix', 'fm', -0.06)] },
+    'helix ratio': { fx: { novelty: 0.8 }, ok: () => routed('helix'), make: () => [K('helix', 'ratio', pick(['1', '3/2', '2', '5/2', '3', '7/2'].filter(r => r !== E.mods.helix.params.ratio.choice)), 'a new modulator ratio, a new set of overtones')] },
     'add tape keyboard': { fx: { novelty: 1.2, energy: 0.1, bright: -0.1 }, ok: () => canAdd() && !E.mods.reel, make: () => { A.lastAdd = performance.now(); return L.reelLayer(A.prof); } },
     'add low-pass gate': { fx: { novelty: 1.1, motion: 0.5, energy: -0.1 }, ok: () => canAdd() && !E.mods.lpg && lpgTargets().length, make: () => { A.lastAdd = performance.now(); const t = lpgTargets(); return L.lpgOn(t.includes('reel') ? 'reel' : pick(t)); } },
     'change tape': { fx: { novelty: 0.9 }, ok: () => routed('reel'), make: () => [K('reel', 'tape', pick(Object.keys(Reel.TAPES).filter(t => t !== E.mods.reel.params.tape.choice)), 'swap the tape for another instrument')] },

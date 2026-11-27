@@ -440,3 +440,7 @@ body.tutor #tutorskip{border-color:#2b6b73;color:var(--ai)}
 .lgsym .x{fill:none}
 .lgsym .b{fill:none;stroke:#ffb03b;stroke-width:1.6}
 .lgsym .t{fill:#ffb03b;font:9px var(--f-mono)}
+/* a knob the person locked: the AI will not turn it */
+.knob.locked{position:relative}
+.knob.locked .dial{outline:1px dashed var(--warn);outline-offset:2px;border-radius:50%}
+.knob.locked::after{content:'LOCK';position:absolute;top:-2px;right:-2px;font:8px var(--f-mono);color:var(--warn);letter-spacing:.06em}

@@ -126,7 +126,7 @@ const Mix = (() => {
   function describe() {
     return [0, 1].map(L => M.last[L] && E.hasLayer(L) ? `${E.layerName(L)} mix: ${summary(M.last[L])}` : null).filter(Boolean).join('\n') || 'no mix measurement yet';
   }
-  function applyNow(acts) { for (const a of acts) { const p = E.mods[a.mod]?.params[a.key]; if (p) p.setNorm(typeof a.to === 'number' ? a.to : (p.normOf(a.to) ?? p.n)); } }
+  function applyNow(acts) { for (const a of acts) { const p = E.mods[a.mod]?.params[a.key]; if (p && !p.locked) p.setNorm(typeof a.to === 'number' ? a.to : (p.normOf(a.to) ?? p.n)); } }
   // measure, then rebalance with the hand (or instantly, on a layer that is not on screen)
   async function pass({ L = E.V, h = 0, why = '' } = {}) {
     if (M.busy || !E.hasLayer(L)) return [];
@@ -160,6 +160,7 @@ const Mix = (() => {
       if (m.kind === 'Bodies' && m.params.bright.n > 0.4) acts.push(K(v, 'bright', m.params.bright.n - 0.25, 'softer, less piercing strike'));
       if (m.kind === 'Chip' && m.params.wave.choice === 'P12') acts.push(K(v, 'wave', 'TRI', 'a softer wave than the thin 12% pulse'));
       if (m.kind === 'Reel') { if (m.params.oct.value > 1) acts.push(K(v, 'oct', stepDown(m.params.oct), 'an octave down, the tape was too high')); if (m.params.tone.n > 0.5) acts.push(K(v, 'tone', m.params.tone.n - 0.2, 'a darker tape')); }
+      if (m.kind === 'Helix') { if (m.params.tone.n > 0.35) acts.push(K(v, 'tone', m.params.tone.n - 0.2, 'close the tone on the folds')); if (m.params.timbre.n > 0.3) acts.push(K(v, 'timbre', m.params.timbre.n - 0.15, 'fewer folds, less fizz')); }
       if (m.kind === 'Geiger') acts.push(K(v, 'tone', Math.max(0, m.params.tone.n - 0.3), 'duller clicks'), K(v, 'vol', m.params.vol.n * 0.6, 'quieter clicks'));
       const nc = E.findCable(v, 'NOTE'), seq = nc && E.mods[nc.from.mod];
       if (seq?.kind === 'StepSeq' && +seq.params.oct.choice >= 5) acts.push(K(seq.id, 'oct', stepDown(seq.params.oct), `${seq.name} an octave down, it was too high`));

@@ -66,6 +66,7 @@ PANELS = {
     'crate':   (420, 'hammer',    (120, 84, 40),   0.65, 0.50, False),  # record-crate brown hammertone
     'comper':  (420, 'enamel',    (40, 84, 72),    0.55, 0.35, False),  # jade green
     'twin':    (330, 'hammer',    (32, 78, 74),    0.60, 0.40, False),  # sea-green hammertone
+    'helix':   (430, 'enamel',    (34, 44, 92),    0.62, 0.45, False),  # cobalt enamel
     'logic':   (220, 'enamel',    (22, 58, 40),    0.60, 0.40, False),  # circuit-board green enamel (logic family)
     'compare': (230, 'enamel',    (22, 58, 40),    0.55, 0.45, False),
     'edge':    (220, 'enamel',    (22, 58, 40),    0.65, 0.35, False),
