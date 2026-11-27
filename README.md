@@ -147,3 +147,24 @@ How it works (`src/logic.js`, `src/logicmods.js`): logic modules do not react in
 The AI has two new moves: a logic rhythm (a sequencer or rhythm generator XOR/AND the beat, played on a drum) and a threshold trigger (an LFO, attractor, follower or contour crossing a level fires grains, a drum or a slope).
 
 Tests: `npm test` (or `node --test tests/*.test.js`). `tests/logic.test.js` checks the core in Node: exhaustive truth tables, timing-diagram fixtures, out-of-order and late events, pass boundaries, feedback, long runs. `tests/browser.test.js` loads the page in headless Chromium (Playwright): Compare and Logic levels are checked sample by sample with OfflineAudioContext at 44.1, 48 and 96 kHz, every module type is built and removed, Toolbox's logic is unchanged, and a live clock → Logic → Edge chain plays in time.
+
+### How the AI uses them
+
+Every design now patches all three, and the song arrangement is heard through them:
+
+- **Logic** cuts in front of whatever played the drums' TRIG (a rhythm generator, Workout, or nothing) and combines it with a sequencer's gates, so a third rhythm plays the drums.
+- **Edge** listens to the bass line, and its note-offs go into Logic's third input. The bass shapes the drum rhythm too.
+- **Compare** watches a slow LFO. Each upward crossing fires something (the rhythm generator's next base rhythm, a Stutter, Grains or Slope), and its GT output is a 0/1 switch on a knob.
+- Each section sets them on its downbeat:
+
+  | Sections | Logic | Compare line |
+  |---|---|---|
+  | Intro, break, outro | AND (sparse) | high (hardly any crossings) |
+  | Verse | ONEHOT | middle |
+  | Build | XOR, then OR halfway | low |
+  | Chorus, drop | OR (busy) | low |
+  | Bridge | ONEHOT, Edge inverted | middle |
+
+- Fills switch Logic's function for one bar. A build's pull bar thins it to AND.
+- Live moves (logic busier, logic sparser, move compare line, edge width) vary them inside a section.
+- Claude's planner is told to do the same in every section it writes.

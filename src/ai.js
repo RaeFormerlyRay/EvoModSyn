@@ -306,7 +306,7 @@ const AI = (() => {
     E.setModDepth(mod, key, d);
     if (el) setTimeout(() => el.classList.remove('ai'), 1200);
   }
-  const FXK = new Set(Object.keys(FX.TYPES)), MODK = new Set(Object.keys(LFO.TYPES));
+  const FXK = new Set(Object.keys(FX.TYPES)), MODK = new Set(Object.keys(LFO.TYPES)), LOGK = new Set(['Logic', 'Edge', 'Compare']);
   const isFx = id => FXK.has(E.mods[id]?.kind);
   function freeChannel() { for (let i = 1; i <= 8; i++) if (!E.findCable('mixer', 'IN' + i)) return i; return 8; }
   const patIx = v => typeof v === 'number' ? (v >= 0 && v < 8 ? v | 0 : -1) : 'ABCDEFGH'.indexOf(String(v || '').toUpperCase().trim());
@@ -856,6 +856,68 @@ const AI = (() => {
       return [{ do: 'say', text: 'Adding a macro: one knob that opens several things at once, and a riser for the builds.' }, { do: 'add', type: 'Macros', id, why: 'one knob for big gestures' },
         ...picks.map(([m, k, , dra]) => ({ do: 'mod', from: `${id}.M1`, to: `${m}.${k}`, depth: safeDepth(m, k, Math.abs(dra)), why: 'macro 1 opens it' })),
         ...(riseT ? [{ do: 'mod', from: `${id}.RISE`, to: `${riseT[0]}.${riseT[1]}`, depth: safeDepth(riseT[0], riseT[1], Math.abs(riseT[3])), why: 'the riser opens it during builds' }] : [])];
+    },
+    // ----- logic: on every design, Logic, Edge and Compare build rhythms and switches the song sections then reshape -----
+    // Logic makes a new drum line out of two rhythms (cutting in front of whatever already plays the drums' TRIG),
+    // Edge turns a bass or lead line's note-offs into hits on Logic's third input, and Compare turns a slow LFO
+    // into hits and a 0/1 switch. The song engine changes all three per section (see LOGIC_ROLE).
+    logicPack(p, o = {}) {
+      const acts = [], used = k => E.order.find(id => E.mods[id].kind === k && E.cablesFrom(id).length);
+      const room = () => 32 - E.order.length - acts.filter(a => a.do === 'add').length;
+      const seqs = activeSeqs(), bassSeq = seqs.find(id => E.cablesFrom(id, 'NOTE').some(c => ['Titan', 'Analog'].includes(E.mods[c.to.mod]?.kind) && /titan|acid|bass/.test(c.to.mod))) || seqs[0];
+      const calm = p.tr.calm, ag = agg(p);
+      let lg = used('Logic'), lgC = false;
+      // 1. LOGIC: two rhythms in, a third out
+      if (!lg && drumsOn() && room() >= 1) {
+        lg = E.newId('logic');
+        const ex = E.findCable('drums', 'TRIG'), exSrc = ex ? `${ex.from.mod}.${ex.from.port}` : null;
+        const gates = seqs.filter(id => id !== bassSeq || seqs.length === 1).map(id => id + '.GATE');
+        const other = gates.length ? pick(gates) : 'clock.BEAT';
+        const a = exSrc || other, b = exSrc ? other : (other === 'clock.BEAT' ? 'clock.CLK' : 'clock.BEAT');
+        const fn = o.fn || (calm > 0.5 ? 'AND' : pick(['XOR', 'XOR', 'ONEHOT', 'OR']));
+        const nm = s => s.split('.')[0] === 'clock' ? (s.endsWith('BEAT') ? 'the beat' : 'the 16ths') : E.mods[s.split('.')[0]].name;
+        acts.push({ do: 'say', text: `Logic: ${nm(a)} against ${nm(b)} makes a third rhythm for the drums. Each section of the song switches its function (AND sparse, XOR and ONEHOT syncopated, OR busy).` },
+          { do: 'add', type: 'Logic', id: lg, why: 'boolean gates that make a new rhythm out of two' });
+        if (ex) acts.push({ do: 'unpatch', to: 'drums.TRIG', why: 'Logic cuts in between this rhythm and the drums' });
+        acts.push(P(a, `${lg}.A`, exSrc ? 'the rhythm that was playing the drums' : 'first rhythm'), P(b, `${lg}.B`, 'second rhythm'),
+          K(lg, 'pass', exSrc ? 'LAST' : 'A', exSrc ? 'keep each hit\'s own drum' : null), K(lg, 'fn', fn, `${fn} for now; the sections will change it`));
+        if (!exSrc) acts.push(K('drums', 'trigv', pick(['RS', 'LT', 'CP', 'HT', 'SD']), 'a mid or low drum, never the cowbell'));
+        acts.push(P(`${lg}.OUT`, 'drums.TRIG', 'the combined rhythm plays the drums'));
+        lgC = true;
+      } else if (lg && !E.findCable(lg, 'C')) lgC = true;
+      // 2. EDGE: the bass or lead line's note-offs (and onsets) become hits
+      if (!used('Edge') && bassSeq && room() >= 1) {
+        const ed = E.newId('edge'), tgt = [lgC && `${lg}.C`, freeIn('slope.TRIG') && E.mods.slope && 'slope.TRIG', E.mods.grains && freeIn('grains.TRIG') && 'grains.TRIG'].filter(Boolean);
+        if (tgt.length) {
+          const to = tgt[0], port = to.endsWith('.C') ? 'FALL' : 'BOTH';
+          acts.push({ do: 'say', text: `Edge: ${E.mods[bassSeq].name}'s ${port === 'FALL' ? 'note-offs' : 'note starts and ends'} become triggers for ${to.endsWith('.C') ? 'Logic\'s third input, so the bass line shapes the drum rhythm too' : E.mods[to.split('.')[0]].name}.` },
+            { do: 'add', type: 'Edge', id: ed, why: 'edge detector: hits from the ends of notes' },
+            P(`${bassSeq}.NOTE`, `${ed}.IN`, 'the line to listen to'), K(ed, 'width', 0, 'short triggers for now'), P(`${ed}.${port}`, to, port === 'FALL' ? 'a hit as each note ends' : 'two hits per note'));
+          if (to.endsWith('.C')) lgC = false;
+        }
+      }
+      // 3. COMPARE: a slow LFO crossing a line becomes hits and a 0/1 switch
+      if (!used('Compare') && room() >= 1) {
+        let src = cvSources().find(s => /^orbit|^attr|^swarm/.test(s)) || cvSources()[0];
+        if (!src && room() >= 2) {
+          const ob = E.newId('orbit');
+          acts.push({ do: 'add', type: 'Orbit', id: ob, why: 'a slow LFO for the comparator to watch' }, K(ob, 'r1', pick([0.14, 0.2]), 'slow: a few crossings a phrase'), K(ob, 's1', 0));
+          src = `${ob}.O1`;
+        }
+        const tg = [lgC && `${lg}.C`, E.mods.prime && freeIn('prime.NEXT') && 'prime.NEXT', ...E.order.filter(id => E.mods[id].kind === 'Stutter' && freeIn(id + '.TRIG')).map(id => id + '.TRIG'),
+          E.mods.grains && freeIn('grains.TRIG') && 'grains.TRIG', E.mods.slope && freeIn('slope.TRIG') && 'slope.TRIG'].filter(Boolean);
+        const knob = modTargets().filter(([m]) => !/^cmp/.test(m)).sort(() => rnd() - 0.5)[0];
+        if (src && (tg.length || knob)) {
+          const cmp = E.newId('cmp'), lvl = 0.15 + rnd() * 0.25, to = tg[0];
+          const what = !to ? '' : to.endsWith('.C') ? 'Logic\'s third input' : to === 'prime.NEXT' ? 'the rhythm generator, stepping it to the next base rhythm' : E.mods[to.split('.')[0]].name;
+          acts.push({ do: 'say', text: `Compare: when ${E.mods[src.split('.')[0]]?.name || 'the LFO'} rises past ${lvl.toFixed(2)}${what ? `, it fires ${what} on the grid` : ''}${knob ? `; while it is above, ${E.mods[knob[0]].name} ${E.mods[knob[0]].params[knob[1]].label} jumps` : ''}. Each section moves the line.` },
+            { do: 'add', type: 'Compare', id: cmp, why: 'a comparator: turns a moving voltage into hits and switches' },
+            P(src, `${cmp}.A`, 'the voltage to watch'), K(cmp, 'thr', (lvl + 1) / 2, 'the line it has to cross'), K(cmp, 'hyst', 0.2, 'hysteresis so it does not chatter'), K(cmp, 'snap', ag > 0.6 ? '1/16' : '1/8', 'land the hits on the grid'));
+          if (to) acts.push(P(`${cmp}.UP`, to, 'each upward crossing fires it'));
+          if (knob) acts.push({ do: 'mod', from: `${cmp}.GT`, to: `${knob[0]}.${knob[1]}`, depth: safeDepth(knob[0], knob[1], knob[2]), why: 'a 0/1 switch: up while the LFO is above the line' });
+        }
+      }
+      return acts;
     }
   };
 
@@ -1133,6 +1195,10 @@ const AI = (() => {
       acts.push(P('cmp.UP', to, 'each crossing fires it'));
       return acts;
     } },
+    'logic busier': { fx: { energy: 0.5, motion: 0.5, novelty: 0.6 }, ok: () => logicMods('Logic').some(id => !['OR', 'XOR'].includes(E.mods[id].params.fn.choice)), make: () => { const id = pick(logicMods('Logic').filter(id => !['OR', 'XOR'].includes(E.mods[id].params.fn.choice))), fn = pick(['OR', 'XOR']); return [K(id, 'fn', fn, fn === 'OR' ? 'OR: every hit of both rhythms' : 'XOR: the off-beats between them')]; } },
+    'logic sparser': { fx: { energy: -0.4, motion: -0.2, novelty: 0.5 }, ok: () => logicMods('Logic').some(id => !['AND', 'ONEHOT'].includes(E.mods[id].params.fn.choice)), make: () => { const id = pick(logicMods('Logic').filter(id => !['AND', 'ONEHOT'].includes(E.mods[id].params.fn.choice))), fn = pick(['AND', 'ONEHOT']); return [K(id, 'fn', fn, fn === 'AND' ? 'AND: only where they agree' : 'ONEHOT: one at a time')]; } },
+    'move compare line': { fx: { novelty: 0.6, motion: 0.6, chaos: 0.3 }, ok: () => logicMods('Compare').length, make: () => { const id = pick(logicMods('Compare')), p = E.mods[id].params.thr, d = (rnd() < 0.5 ? -1 : 1) * (0.06 + rnd() * 0.1); return [K(id, 'thr', clamp(p.n + d, 0.3, 0.97), d < 0 ? 'lower the line: the switch stays on longer' : 'raise the line: fewer, later hits', 1500)]; } },
+    'edge width': { fx: { novelty: 0.5, motion: 0.4, energy: 0.1 }, ok: () => logicMods('Edge').length, make: () => { const id = pick(logicMods('Edge')), w = E.mods[id].params.width.n; return [K(id, 'width', w > 0.2 ? 0 : 0.3 + rnd() * 0.3, w > 0.2 ? 'back to short triggers' : 'stretch the edges into gates')]; } },
     'add tape keyboard': { fx: { novelty: 1.2, energy: 0.1, bright: -0.1 }, ok: () => canAdd() && !E.mods.reel, make: () => { A.lastAdd = performance.now(); return L.reelLayer(A.prof); } },
     'add low-pass gate': { fx: { novelty: 1.1, motion: 0.5, energy: -0.1 }, ok: () => canAdd() && !E.mods.lpg && lpgTargets().length, make: () => { A.lastAdd = performance.now(); const t = lpgTargets(); return L.lpgOn(t.includes('reel') ? 'reel' : pick(t)); } },
     'change tape': { fx: { novelty: 0.9 }, ok: () => routed('reel'), make: () => [K('reel', 'tape', pick(Object.keys(Reel.TAPES).filter(t => t !== E.mods.reel.params.tape.choice)), 'swap the tape for another instrument')] },
@@ -1232,6 +1298,28 @@ const AI = (() => {
     [...$('#timeline').querySelectorAll('.sec')].forEach((d, i) => d.classList.toggle('now', A.sections[i] === cur));
   }, 250);
 
+  // how each kind of section sets the logic: sparse and spacious for intros and breaks, syncopated for verses, busy for drops
+  const LOGIC_ROLE = {
+    intro: { fn: 'AND', thr: 0.9, w: 0, inv: 'OFF', snap: '1/8' }, verse: { fn: 'ONEHOT', thr: 0.4, w: 0, inv: 'OFF', snap: '1/8' },
+    pre: { fn: 'XOR', thr: 0.15, w: 0.3, inv: 'OFF', snap: '1/16' }, build: { fn: 'XOR', thr: 0.1, w: 0.3, inv: 'OFF', snap: '1/16' },
+    chorus: { fn: 'OR', thr: 0, w: 0.4, inv: 'OFF', snap: '1/16' }, drop: { fn: 'OR', thr: -0.2, w: 0.45, inv: 'OFF', snap: '1/16' },
+    post: { fn: 'XOR', thr: 0.1, w: 0.3, inv: 'OFF', snap: '1/16' }, peak: { fn: 'OR', thr: -0.25, w: 0.5, inv: 'OFF', snap: '1/16' },
+    solo: { fn: 'XOR', thr: 0.2, w: 0.35, inv: 'ON', snap: '1/16' }, bridge: { fn: 'ONEHOT', thr: 0.5, w: 0.55, inv: 'ON', snap: '1/8' },
+    break: { fn: 'AND', thr: 0.95, w: 0.6, inv: 'ON', snap: '1/8' }, outro: { fn: 'AND', thr: 0.9, w: 0, inv: 'OFF', snap: '1/8' }
+  };
+  A.LOGIC_ROLE = LOGIC_ROLE;
+  const logicMods = k => E.order.filter(id => E.mods[id].kind === k && E.cablesFrom(id).length);
+  // knob turns that put every patched logic module into a section's setting
+  function logicShift(role, why) {
+    const R = LOGIC_ROLE[role] || LOGIC_ROLE.verse, acts = [], tag = why ? ` (${why})` : '';
+    const set = (id, k, v, w) => { const p = E.mods[id].params[k], n = typeof v === 'string' ? p.normOf(v) : v; if (n != null && Math.abs(n - p.n) > 1e-3) acts.push(K(id, k, v, w + tag)); };
+    for (const id of logicMods('Logic')) set(id, 'fn', R.fn, { AND: 'AND: only where the rhythms agree, sparse', OR: 'OR: every hit of both, busy', XOR: 'XOR: only where they disagree, syncopated', ONEHOT: 'ONEHOT: where exactly one is on' }[R.fn]);
+    for (const id of logicMods('Compare')) { set(id, 'thr', (R.thr + 1) / 2, R.thr > 0.7 ? 'line raised high: hardly any crossings' : R.thr < 0 ? 'line lowered: long switch-ons' : 'line in the middle'); set(id, 'snap', R.snap, 'snap to ' + R.snap); }
+    for (const id of logicMods('Edge')) { set(id, 'width', R.w, R.w ? 'longer gates from the edges' : 'short triggers'); set(id, 'inv', R.inv, R.inv === 'ON' ? 'flip it: the gaps become the hits' : 'edges the right way up'); }
+    if (acts.length) acts.unshift({ do: 'say', text: `Logic for the ${role}: ${R.fn}${logicMods('Compare').length ? `, comparator line at ${R.thr.toFixed(2)}` : ''}${logicMods('Edge').length && R.inv === 'ON' ? ', edges inverted' : ''}.` });
+    return acts;
+  }
+  A.logicShift = logicShift;
   const secPat = (L, why) => activeSeqs().filter(id => !E.mods[id].songOn && E.mods[id].hasNotes('ABCDEFGH'.indexOf(L))).map(id => ({ do: 'select', mod: id, pat: L, why }));
   const SECTION_MOVES = {
     intro: () => [...secPat('C', 'intro pattern'), { do: 'mute', inst: 'BD', on: true, why: 'start without the kick' }, { do: 'mute', inst: 'SD', on: true }, { do: 'mute', inst: 'CP', on: true }, ...voiceCut().map(([m, k]) => K(m, k, 0.15, 'start dark', 2500))],
@@ -1291,7 +1379,7 @@ ACTIONS (JSON objects):
 {"do":"fire","mod":"stut2","type":"REPEAT|REVERSE|STOP|SPIN"}  (a glitch right now)
 {"do":"say","text":"short first-person narration of your intent"}
 
-ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}${t.desc ? ': ' + t.desc : ''}, ids like ${t.prefix}3)`).join('; ')}. CV outputs swing about -1..1 (Contour 0..1); a voice CUT input moves the cutoff 2 octaves per unit. Modulation modules (Contour, Swarm, Toolbox) make complex patches: patch their outputs into CUT, FOLD, CV, POS and similar inputs. Workout and Marbles outputs are events (ev) for TRIG/CLK/NOTE inputs. Logic modules: Logic combines two or three event streams (AND, OR, XOR, ONEHOT; OUT on, INV off) and is the way to merge two trigger sources into one input or to make a new rhythm out of two; Edge gives RISE/FALL/BOTH triggers from gates and notes; Compare turns a CV (an LFO, attractor or Follower ENV) into UP/DOWN triggers and 0/1 GT/LT/WIN signals. Their GATE outputs are 0/1 control signals you can drop on knobs. Effects (Halls, Echoes, Ensemble, Phaser, Heat, Bode, Sympathy, Vowel, Pump, Stutter, Prism, Cassette, Horizon, Twin) go in with "insert". Modulation sources (Orbit, Performer, Attractor, Macros, Follower, Swarm, Contour) should be used OFTEN: drop their outputs onto synth, filter and effect knobs with "mod", subtle depths (0.05-0.2) for verses, dramatic ones (0.3-0.6) for drops and choruses. Do not use the cowbell (CB) or bells more than rarely, and keep high repeating sounds low in the mix. Vary the instruments: do not default to the Bodies bell. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
+ADDABLE MODULE TYPES: ${Object.entries(Mods.TYPES).map(([k, t]) => `${k} (${t.label}${t.desc ? ': ' + t.desc : ''}, ids like ${t.prefix}3)`).join('; ')}. CV outputs swing about -1..1 (Contour 0..1); a voice CUT input moves the cutoff 2 octaves per unit. Modulation modules (Contour, Swarm, Toolbox) make complex patches: patch their outputs into CUT, FOLD, CV, POS and similar inputs. Workout and Marbles outputs are events (ev) for TRIG/CLK/NOTE inputs. Logic modules: Logic combines two or three event streams (AND, OR, XOR, ONEHOT; OUT on, INV off) and is the way to merge two trigger sources into one input or to make a new rhythm out of two; Edge gives RISE/FALL/BOTH triggers from gates and notes; Compare turns a CV (an LFO, attractor or Follower ENV) into UP/DOWN triggers and 0/1 GT/LT/WIN signals. Their GATE outputs are 0/1 control signals you can drop on knobs. ALWAYS USE THE LOGIC MODULES, in every design and every song: (1) add a Logic and patch two rhythms into it (for example the drums' current TRIG source or a sequencer GATE into A, clock.BEAT or another sequencer GATE into B; unpatch drums.TRIG first if something already plays it), then logic.OUT into drums.TRIG with "pass" LAST; (2) add an Edge on the bass sequencer's NOTE and patch edge.FALL into logic.C so the note-offs shape the rhythm too; (3) add a Compare watching a slow Orbit or Attractor output (cmp.A), patch cmp.UP to a trigger input (prime.NEXT, a Stutter TRIG, grains.TRIG or slope.TRIG) and drop cmp.GT on a knob with "mod" as a 0/1 switch. Then use them to build the song's structure: every section's actions must turn at least one logic knob: Logic fn AND for intros, breaks and outros (sparse), ONEHOT or XOR for verses (syncopated), OR for choruses and drops (busy); raise Compare thr (0.9-0.97 normalized) for quiet sections and lower it (0.4-0.5) for big ones; Edge width 0 for verses, 0.3-0.6 for choruses, inv ON for breaks and bridges. Effects (Halls, Echoes, Ensemble, Phaser, Heat, Bode, Sympathy, Vowel, Pump, Stutter, Prism, Cassette, Horizon, Twin) go in with "insert". Modulation sources (Orbit, Performer, Attractor, Macros, Follower, Swarm, Contour) should be used OFTEN: drop their outputs onto synth, filter and effect knobs with "mod", subtle depths (0.05-0.2) for verses, dramatic ones (0.3-0.6) for drops and choruses. Do not use the cowbell (CB) or bells more than rarely, and keep high repeating sounds low in the mix. Vary the instruments: do not default to the Bodies bell. You may add as many as the music needs (rack limit 32 modules). A new voice needs a sequencer (or ent/geiger) feeding its NOTE input and a "route" to be heard; "route" finds a free mixer channel and adds a mixer when all are taken.
 
 Reply with JSON only:
 {"summary":"one sentence","targets":{"energy":0-1,"brightness":0-1},
@@ -1372,10 +1460,12 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       if (!E.running) await run({ do: 'transport', run: true });
       { const f = Theory.unfart('sound design check: no farty synths'); if (f.length && !A.abort) { A.log('sys', 'checking the sound design: avoiding farty, blatty synth settings'); await runAll(f); } }
       // effects and modulation on almost every design: tidy away unused ones first, then pick fresh ones
-      if (!A.abort) { const idle = E.order.filter(id => (FXK.has(E.mods[id].kind) || MODK.has(E.mods[id].kind)) && !E.cables.some(c => c.from.mod === id || c.to.mod === id)); for (const id of idle) { if (A.abort) break; await run({ do: 'remove', mod: id, why: 'not part of this patch' }); } }
+      if (!A.abort) { const idle = E.order.filter(id => (FXK.has(E.mods[id].kind) || MODK.has(E.mods[id].kind) || LOGK.has(E.mods[id].kind)) && !E.cables.some(c => c.from.mod === id || c.to.mod === id)); for (const id of idle) { if (A.abort) break; await run({ do: 'remove', mod: id, why: 'not part of this patch' }); } }
       if (!plan && !A.abort && rnd() < 0.9) await runAll(L.fxPack(p));
       if (!plan && !A.abort && rnd() < 0.85) await runAll(L.modPack(p));
       if (!plan && !A.abort && p.mode === 'perform' && rnd() < 0.6) await runAll(L.macroPack());
+      // logic on every design (and after Claude's plan if it left any of the three out): the song sections reshape it
+      if (!A.abort) { const lp = L.logicPack(p); if (lp.length) { A.stateName = 'Patching logic'; await runAll(lp); } }
       { const g = Mix.ungrate(); if (g.length && !A.abort) await runAll(g); }
       if (Mix.on && !A.abort) { A.stateName = 'Mixing'; await Mix.pass({ why: 'balance the new patch' }); }
     } else {
@@ -1399,6 +1489,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
       if (/envelope|maths|contour|pluck|function gen/i.test(t) && !E.mods.contour && envTargets().length) await runAll(L.contourEnv(...pick(envTargets())));
       if (/euclid|polyrhythm|workout|clock div/i.test(t) && !E.mods.work && drumsOn()) await runAll(L.workoutDrums('RS', '1/16', 5, 0.85));
       if (/sample.?(and|&|n).?hold|s&h|toolbox|utilit/i.test(t) && !E.mods.tools && freeCV().length) await runAll(L.shTo(pick(freeCV()), 'clock.BEAT'));
+      if (/logic|boolean|\bxor\b|\band gate|\bor gate|one.?hot|compar|threshold|edge|note.?off|gate/i.test(t)) { const lp = L.logicPack(p, { fn: /\bxor\b/i.test(t) ? 'XOR' : /one.?hot/i.test(t) ? 'ONEHOT' : /\band\b/i.test(t) ? 'AND' : null }); if (lp.length) await runAll(lp); else await runAll(logicShift(/sparse|less|calm/i.test(t) ? 'break' : /busy|more|big|drop|chorus/i.test(t) ? 'drop' : 'verse', 'as asked')); }
       if (!E.running) await run({ do: 'transport', run: true });
     }
     if (A.abort) return finish();
@@ -1438,7 +1529,7 @@ ${A.songForm ? 'A song engine will arrange the song form after your design (vers
           curSec = s; A.stateName = `Performing · ${s.name}`; target.energy = s.energy;
           A.log('sys', `— <b>${esc(s.name)}</b> (energy target ${Math.round(s.energy * 100)}%) —`);
           const key = s.name.toLowerCase().replace(/[^a-z]/g, '');
-          const scripted = s.acts && s.acts.length ? s.acts : (SECTION_MOVES[Object.keys(SECTION_MOVES).find(k => key.includes(k))] || (() => []))();
+          const scripted = [...(s.acts && s.acts.length ? s.acts : (SECTION_MOVES[Object.keys(SECTION_MOVES).find(k => key.includes(k))] || (() => []))()), ...logicShift(Object.keys(LOGIC_ROLE).find(k => key.includes(k)) || (s.energy > 0.75 ? 'drop' : s.energy < 0.4 ? 'break' : 'verse'), s.name)];
           A.think(A.stateName, `Entering ${s.name}. Aiming for ${Math.round(s.energy * 100)}% energy.`);
           await runAll(scripted);
           continue;

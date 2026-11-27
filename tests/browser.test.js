@@ -134,6 +134,20 @@ test('browser', { skip: !chromium && 'playwright is not installed' }, async t =>
       assert.equal(r.copied, 'XOR', 'the layer copy kept the function');
     });
 
+    await t.test('AI: a song design always patches Logic, Edge and Compare, and every section sets them', async () => {
+      await page.evaluate(() => { UI.speed = 0.02; window.__run = AI.perform('Make a techno song', 'a curious producer', 'local'); });
+      await page.waitForFunction(() => /logic for /.test(document.querySelector('#log').innerText), null, { timeout: 180000 });
+      const r = await page.evaluate(() => {
+        const E = Engine, by = k => E.order.filter(id => E.mods[id].kind === k && E.cablesFrom(id).length);
+        const shift = AI.logicShift('break', 'test').filter(a => a.do === 'knob').map(a => `${a.mod}.${a.key}`);
+        return { logic: by('Logic'), edge: by('Edge'), cmp: by('Compare'), drums: E.findCable('drums', 'TRIG')?.from.mod, shift };
+      });
+      await page.evaluate(() => { AI.abort = true; Song.stop(); });
+      assert.equal(r.logic.length, 1, 'one patched Logic'); assert.equal(r.edge.length, 1, 'one patched Edge'); assert.equal(r.cmp.length, 1, 'one patched Compare');
+      assert.equal(r.drums, r.logic[0], 'Logic plays the drums');
+      assert.ok(r.shift.some(k => k.endsWith('.fn')) || r.shift.length, 'a section change turns logic knobs');
+    });
+
     await t.test('no console errors', () => { assert.deepEqual(errors, []); });
   } finally {
     await browser.close(); srv.close();

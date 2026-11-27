@@ -190,6 +190,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     const d = E.mods.drums; if (d) d.mute = d.INST.map(() => false);
     AI.target.energy = s.energy;
     scene(s, t);
+    try { logicScene(s, t); } catch (e) { console.error(e); }
     try { genreScene(s, t, S.sections[i + 1]); } catch (e) { console.error(e); }
     if (s.final && !S.lift && rnd() < 0.5) lift(t);
     E.at(t, () => {
@@ -224,14 +225,31 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
         d.pats[PULL] = bankFromRows(T.drumsFor(s.role, S.base, 'pull', Genres.get(S.p?.genre))); d.queue(PULL);
         for (const [id, part] of Object.entries(S.parts)) { const m = E.mods[id]; if (!m) continue; if (part === 'bass') { m.pats[7] = m.pats[7].map(x => ({ ...x, g: 0 })); m.queue(7); } }
         E.at(t, () => log('pull: kick and bass out for one bar'));
-      } else if (k === Math.floor(s.bars / 2)) { d.pats[ROLL] = bankFromRows(T.drumsFor(s.role, S.base, 'roll', Genres.get(S.p?.genre))); d.queue(ROLL); E.at(t, () => log('build: snare roll doubles up')); }
+        logicSet({ fn: 'AND', inv: 'ON' }, t, 'logic thins to AND for the pull bar');
+      } else if (k === Math.floor(s.bars / 2)) { d.pats[ROLL] = bankFromRows(T.drumsFor(s.role, S.base, 'roll', Genres.get(S.p?.genre))); d.queue(ROLL); E.at(t, () => log('build: snare roll doubles up')); logicSet({ fn: 'OR', w: 0.5, thr: -0.3 }, t, 'build: logic opens to OR, edges stretch, comparator line drops'); }
       return;
     }
-    if (left === 1 && d && s.bars >= 4) { d.pats[FILL] = bankFromRows(T.drumsFor(s.role, d.INST.reduce((o, ins, r) => { const x = d.pats[s.dslot][r].map(v => v === 2 ? 'X' : v ? 'x' : '.').join(''); if (/[xX]/.test(x)) o[ins] = x; return o; }, {}), 'fill')); d.queue(FILL); E.at(t, () => log('fill into the next section')); return; }
+    if (left === 1 && d && s.bars >= 4) { d.pats[FILL] = bankFromRows(T.drumsFor(s.role, d.INST.reduce((o, ins, r) => { const x = d.pats[s.dslot][r].map(v => v === 2 ? 'X' : v ? 'x' : '.').join(''); if (/[xX]/.test(x)) o[ins] = x; return o; }, {}), 'fill')); d.queue(FILL); E.at(t, () => log('fill into the next section')); logicSet({ fn: s.energy > 0.6 ? 'XOR' : 'OR' }, t, 'logic changes function for the fill'); return; }
     if (d && d.cur === FILL) d.queue(s.dslot);
     // push-pull wave: halfway through an 8-bar phrase, dip the filters for a bar, then push them back
     if (s.bars >= 8 && k % 8 === 4) { AI.voiceCut().forEach(([m, key]) => { const p = E.mods[m].params[key]; auto(p, clamp(p.n - 0.12), t, 16 * E.sixteenth() * 0.9); auto(p, p.n, t + 16 * E.sixteenth(), 16 * E.sixteenth() * 0.5); }); }
   }
+  // ======================= LOGIC PER SECTION =======================
+  // each section puts Logic, Compare and Edge into its own setting on the downbeat (AI.LOGIC_ROLE): the song's structure
+  // is heard in the logic-made rhythms, not only in the notes
+  function logicSet(R, t, why) {
+    const ch = [];
+    for (const id of E.order) {
+      const m = E.mods[id]; if (!['Logic', 'Compare', 'Edge'].includes(m.kind) || !E.cablesFrom(id).length) continue;
+      const set = (k, v) => { const p = m.params[k]; if (!p || v == null) return; const n = typeof v === 'string' ? p.normOf(v) : k === 'thr' ? (v + 1) / 2 : v; if (n == null || Math.abs(n - p.n) < 1e-3) return; E.at(t, () => p.setNorm(n)); ch.push(`${m.name} ${p.label} ${typeof v === 'string' ? v : v.toFixed(2)}`); };
+      if (m.kind === 'Logic') set('fn', R.fn);
+      if (m.kind === 'Compare') { set('thr', R.thr); set('snap', R.snap); }
+      if (m.kind === 'Edge') { set('width', R.w); set('inv', R.inv); }
+    }
+    if (ch.length) E.at(t, () => log(`${esc(why)}: ${esc(ch.join(', '))}`));
+    return ch.length;
+  }
+  function logicScene(s, t) { const R = AI.LOGIC_ROLE?.[s.role] || AI.LOGIC_ROLE?.verse; if (R) logicSet(R, t, `logic for ${s.name}`); }
   function restart(bar, t) { S.startBar = bar; S.sections.forEach(s => { if (s.role !== 'intro') s.planned = s.written = false; }); const i = Math.max(0, S.sections.findIndex(x => x.role === 'verse')); S.startBar = bar - S.sections[i].start; enter(i, t, bar * 16); }
 
   // ======================= SCENES, BUILDS, LIFTS (knob automation off the hand) =======================
@@ -360,8 +378,9 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     planData(S.sections[0]); await claudeSection(S.sections[0]);
     await AI.runAll(writeActs(S.sections[0], false)); S.sections[0].written = true;
     if (!S.on) return false;
-    // start on the next bar line
-    S.startBar = Math.floor(E.step / 16) + 1;
+    // start on a bar line whose bar-before has not been announced yet, so section 0 is entered properly (its harmony,
+    // drums, scene and logic); with floor() the first section's entry was skipped whenever the current bar had begun
+    S.startBar = Math.ceil(E.step / 16) + 1;
     log(`the song starts at the next bar`);
     return true;
   }
