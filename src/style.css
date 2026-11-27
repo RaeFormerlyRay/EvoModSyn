@@ -427,3 +427,8 @@ canvas.scr.flash{box-shadow:0 0 0 1px #fff8,0 0 14px #fff6}
 body.tutor #tutorskip{border-color:#2b6b73;color:var(--ai)}
 @media (prefers-reduced-motion: reduce){#tutorbubble{transition:none}#tutorbubble .tb-skip{animation:none}}
 .btn.tap{padding:5px 10px;font-size:11px}
+
+/* a knob the person locked: the AI will not turn it */
+.knob.locked{position:relative}
+.knob.locked .dial{outline:1px dashed var(--warn);outline-offset:2px;border-radius:50%}
+.knob.locked::after{content:'LOCK';position:absolute;top:-2px;right:-2px;font:8px var(--f-mono);color:var(--warn);letter-spacing:.06em}

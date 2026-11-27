@@ -44,7 +44,10 @@ const UI = (() => {
     let sy = 0, sn = 0, drag = false;
     const linkOf = () => E.within(+el.closest('.mod').dataset.layer, () => E.findCable(mod.id, '@' + key));
     let depthDrag = false, sd = 0;
-    dial.addEventListener('contextmenu', e => { const c = linkOf(); if (!c) return; e.preventDefault(); E.within(+el.closest('.mod').dataset.layer, () => E.disconnect(c)); });
+    // right-click: pulls a modulation cable off the knob if it has one, otherwise locks the knob so the AI leaves it alone
+    const lock = on => { p.locked = on; el.classList.toggle('locked', on); dial.title = on ? 'Locked: the AI will not turn this knob (right-click or L to unlock)' : ''; };
+    dial.addEventListener('contextmenu', e => { e.preventDefault(); const c = linkOf(); if (c) { E.within(+el.closest('.mod').dataset.layer, () => E.disconnect(c)); return; } lock(!p.locked); });
+    dial.addEventListener('keydown', e => { if (e.key === 'l' || e.key === 'L') lock(!p.locked); });
     dial.addEventListener('pointerdown', e => { if ((e.altKey || e.ctrlKey || e.metaKey) && linkOf()) { depthDrag = true; sy = e.clientY; sd = p.modDepth; dial.setPointerCapture(e.pointerId); e.preventDefault(); showDepth(e, p); return; } drag = true; sy = e.clientY; sn = p.n; dial.setPointerCapture(e.pointerId); showReadout(e, p); e.preventDefault(); });
     dial.addEventListener('pointermove', e => { if (depthDrag) { E.within(+el.closest('.mod').dataset.layer, () => E.setModDepth(mod.id, key, sd + (sy - e.clientY) / 170)); showDepth(e, p); return; } if (!drag) return; const k = e.shiftKey ? 0.15 : 1; p.setNorm(sn + (sy - e.clientY) / 170 * k * (p.steps ? Math.max(1, 8 / p.steps.length) : 1)); showReadout(e, p); });
     const up = () => { drag = false; depthDrag = false; readout.style.display = 'none'; };
