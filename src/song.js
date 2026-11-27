@@ -241,7 +241,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     S.autos = S.autos.filter(a => {
       if (now < a.t0) return true;
       if (a.from == null) a.from = a.p.n;
-      const k = clamp((now - a.t0) / (a.t1 - a.t0)); a.p.setNorm(a.from + (a.to - a.from) * k);
+      const k = clamp((now - a.t0) / (a.t1 - a.t0)); if (!a.p.locked) a.p.setNorm(a.from + (a.to - a.from) * k);
       return k < 1;
     });
   }
@@ -293,7 +293,7 @@ Reply with JSON only: {"progression":[2-4 chord degrees 0-6],"barsPerChord":1|2|
     const rate = s._wob[k % s._wob.length];
     for (const m of mods(s.layer || 0, 'Titan')) {
       const p = m.params.wrate, n = p.normOf(rate); if (n == null || Math.abs(n - p.n) < 1e-3) continue;
-      E.at(t, () => { p.setNorm(n); if (k % 4 === 0) log(`wobble: ${esc(m.name)} rate ${rate}, changing every bar`); });
+      E.at(t, () => { if (p.locked) return; p.setNorm(n); if (k % 4 === 0) log(`wobble: ${esc(m.name)} rate ${rate}, changing every bar`); });
     }
     void nx;
   }
